@@ -7,7 +7,8 @@ GENS=${2:-20}
 cd "$(dirname "$0")"
 python3 -m venv .venv
 ./.venv/bin/pip install -q --upgrade pip
-./.venv/bin/pip install -q -r requirements.txt
+# requirements.txt pins numpy/scipy builds that need Python 3.11; the node has 3.10
+./.venv/bin/pip install -q fastapi numpy pydantic pygame requests scipy shapely uvicorn
 export SDL_VIDEODRIVER=dummy
 ./.venv/bin/python -c "import pygame,numpy,scipy,shapely; print('deps ok on', __import__('platform').machine())"
 # 24-seed baseline first, so cluster numbers are comparable with the Mac (889 / 950)
