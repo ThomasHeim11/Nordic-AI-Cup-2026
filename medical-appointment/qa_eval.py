@@ -23,7 +23,12 @@ def cached_transcript(key: str):
     path = os.path.join(CACHE, f"{transcript_id}.json")
     if os.path.exists(path):
         with open(path) as f:
-            return json.load(f)
+            segs = json.load(f)
+        if segs and "_silences" not in segs[0]:
+            from faster_whisper.audio import decode_audio
+            audio = decode_audio(os.path.join(HERE, "data", "audio", audio_filename_for_transcript(transcript_id)), sampling_rate=16000)
+            segs[0]["_silences"] = pipeline.silence_intervals(audio)
+        return segs
     t0 = time.perf_counter()
     segs = pipeline.transcribe(load_sample_audio(audio_filename_for_transcript(transcript_id)))
     with open(path, "w") as f:
@@ -41,13 +46,16 @@ def main():
     ap.add_argument("--pad", type=float, default=0.0)
     ap.add_argument("--rerank", type=int, default=0)
     ap.add_argument("--seg-sub-min", type=float, default=0.35)
-    ap.add_argument("--rerank-quote", type=int, default=1)
+    ap.add_argument("--rerank-quote", type=int, default=0)
+    ap.add_argument("--snap", type=int, default=1)
+    ap.add_argument("--snap-start-tol", type=float, default=0.6)
+    ap.add_argument("--snap-end-tol", type=float, default=0.3)
     a = ap.parse_args()
     sys.path.insert(0, HERE)
     import pipeline
     from utils import group_questions_by_conversation, gold_evidence, temporal_iou
 
-    pipeline.SPAN_STRATEGY.update({"mode": a.mode, "pad": a.pad, "rerank": a.rerank, "seg_sub_min": a.seg_sub_min, "rerank_quote": a.rerank_quote})
+    pipeline.SPAN_STRATEGY.update({"mode": a.mode, "pad": a.pad, "rerank": a.rerank, "seg_sub_min": a.seg_sub_min, "rerank_quote": a.rerank_quote, "snap": a.snap, "snap_start_tol": a.snap_start_tol, "snap_end_tol": a.snap_end_tol})
     raw_path = os.path.join(HERE, "cache", "llm_raw.json")
     raw_cache = json.load(open(raw_path)) if os.path.exists(raw_path) else {}
     convs = group_questions_by_conversation()

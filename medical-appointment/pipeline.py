@@ -29,6 +29,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+BACKEND = os.environ.get("MEDICAL_BACKEND", "mlx")     # "mlx" on the Mac, "torch" on CUDA nodes
 ASR_REPO = os.environ.get("ASR_REPO", "mlx-community/whisper-large-v3-turbo")
 LLM_REPO = os.environ.get("LLM_REPO", "mlx-community/Qwen2.5-7B-Instruct-4bit")
 MAX_SPAN_SECONDS = 16.0
@@ -49,14 +50,71 @@ def decode_mp3(audio_bytes: bytes, sampling_rate: int = 16000) -> np.ndarray:
     return decode_audio(io.BytesIO(audio_bytes), sampling_rate=sampling_rate)
 
 
+def silence_intervals(audio: np.ndarray, sr: int = 16000, frame_s: float = 0.01,
+                      min_len_s: float = 0.12) -> List[Tuple[float, float]]:
+    """(start, end) of silences >= min_len_s, from a simple RMS energy gate.
+
+    The conversations are synthesized, so utterance boundaries are clean gaps;
+    gold evidence spans start at the speech onset after such a gap (within
+    ~0.05 s) and end at the last word's end.
+    """
+    n = int(frame_s * sr)
+    if len(audio) < 2 * n:
+        return []
+    m = len(audio) // n
+    env = np.sqrt(np.mean(audio[: m * n].reshape(m, n) ** 2, axis=1))
+    thr = float(np.percentile(env, 20)) * 1.5 + 1e-6
+    sil = env < thr
+    out, start = [], None
+    for i, v in enumerate(sil):
+        if v and start is None:
+            start = i
+        elif not v and start is not None:
+            if (i - start) * frame_s >= min_len_s:
+                out.append((start * frame_s, i * frame_s))
+            start = None
+    if start is not None and (m - start) * frame_s >= min_len_s:
+        out.append((start * frame_s, m * frame_s))
+    return out
+
+
+def snap_span(span: Span, silences: Sequence[Tuple[float, float]], start_tol: float = 0.6,
+              end_tol: float = 0.3) -> Span:
+    """Snap a span's start to the nearest speech onset and its end to the nearest speech offset."""
+    if not silences:
+        return span
+    s, e = span
+    onsets = [b for _, b in silences]          # speech starts where a silence ends
+    offsets = [a for a, _ in silences]         # speech ends where a silence starts
+    ns = min(onsets, key=lambda x: abs(x - s))
+    if abs(ns - s) <= start_tol:
+        s = ns
+    ne = min(offsets, key=lambda x: abs(x - e))
+    if abs(ne - e) <= end_tol:
+        e = ne
+    if e <= s:
+        return span
+    return (round(s, 2), round(e, 2))
+
+
 def transcribe(audio_bytes: bytes) -> List[Dict]:
-    """Return [{"start", "end", "text"}] segments with second timestamps."""
-    import mlx_whisper
+    """Return [{"start", "end", "text"}] segments with second timestamps.
+
+    The segment list also carries the silence structure of the audio under
+    the key "_silences" of the first segment (so callers that only pass the
+    segment list around still have it).
+    """
     audio = decode_mp3(audio_bytes)
-    result = mlx_whisper.transcribe(
-        audio, path_or_hf_repo=ASR_REPO, language="en", word_timestamps=True,
-        condition_on_previous_text=False, fp16=True,
-    )
+    silences = silence_intervals(audio)
+    if BACKEND == "torch":
+        import backend_torch
+        result = backend_torch.transcribe_words(audio)
+    else:
+        import mlx_whisper
+        result = mlx_whisper.transcribe(
+            audio, path_or_hf_repo=ASR_REPO, language="en", word_timestamps=True,
+            condition_on_previous_text=False, fp16=True,
+        )
     segments = []
     for s in result.get("segments", []):
         text = s.get("text", "").strip()
@@ -65,6 +123,8 @@ def transcribe(audio_bytes: bytes) -> List[Dict]:
         words = [{"word": w["word"].strip(), "start": float(w["start"]), "end": float(w["end"])}
                  for w in s.get("words", []) if w.get("word", "").strip()]
         segments.append({"start": float(s["start"]), "end": float(s["end"]), "text": text, "words": words})
+    if segments:
+        segments[0]["_silences"] = silences
     return segments
 
 
@@ -126,7 +186,7 @@ def parse_answers(text: str, n: int) -> List[Tuple[Optional[bool], Optional[int]
     return out
 
 
-SPAN_STRATEGY = {"mode": "quote", "pad": 0.0, "rerank": 1, "seg_sub_min": 0.5, "rerank_quote": 0}   # best on question_train.csv: 0.700
+SPAN_STRATEGY = {"mode": "quote", "pad": 0.0, "rerank": 1, "seg_sub_min": 0.5, "rerank_quote": 0, "snap": 1, "snap_start_tol": 0.4, "snap_end_tol": 0.2}   # best on question_train.csv: 0.700
 
 RERANK_SYSTEM = """You are checking which transcript line is the evidence for a yes/no question that was answered YES.
 For each question you get a few candidate lines from the transcript. Pick the ONE line whose words most literally and directly state the fact the question asks about (same drug, same number, same finding, same action). Prefer the line containing the specific detail over a vague or paraphrased one.
@@ -135,15 +195,19 @@ Output one line per question, in order: <question number>|<line number>|<the exa
 
 def _llm_generate(system: str, user: str, max_tokens: int, raw_cache: Optional[Dict[str, str]] = None) -> str:
     import hashlib
-    key = hashlib.sha1((system + "\n" + user + LLM_REPO).encode()).hexdigest()
+    key = hashlib.sha1((system + "\n" + user + (os.environ.get("LLM_HF_REPO", "Qwen/Qwen2.5-32B-Instruct") if BACKEND == "torch" else LLM_REPO)).encode()).hexdigest()
     if raw_cache is not None and key in raw_cache:
         return raw_cache[key]
-    from mlx_lm import generate
-    from mlx_lm.sample_utils import make_sampler
-    model, tok = load_llm()
-    msgs = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-    prompt = tok.apply_chat_template(msgs, add_generation_prompt=True)
-    text = generate(model, tok, prompt=prompt, max_tokens=max_tokens, verbose=False, sampler=make_sampler(temp=0.0))
+    if BACKEND == "torch":
+        import backend_torch
+        text = backend_torch.chat(system, user, max_tokens)
+    else:
+        from mlx_lm import generate
+        from mlx_lm.sample_utils import make_sampler
+        model, tok = load_llm()
+        msgs = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        prompt = tok.apply_chat_template(msgs, add_generation_prompt=True)
+        text = generate(model, tok, prompt=prompt, max_tokens=max_tokens, verbose=False, sampler=make_sampler(temp=0.0))
     if raw_cache is not None:
         raw_cache[key] = text
     return text
@@ -214,14 +278,7 @@ def answer_all(segments: Sequence[Dict], questions: Sequence[str], deadline: Opt
         if raw_cache is not None and key in raw_cache:
             text = raw_cache[key]
         else:
-            from mlx_lm import generate
-            from mlx_lm.sample_utils import make_sampler
-            model, tok = load_llm()
-            msgs = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}]
-            prompt = tok.apply_chat_template(msgs, add_generation_prompt=True)
-            t0 = time.perf_counter()
-            text = generate(model, tok, prompt=prompt, max_tokens=MAX_NEW_TOKENS, verbose=False,
-                            sampler=make_sampler(temp=0.0))
+            text = _llm_generate(SYSTEM_PROMPT, user, MAX_NEW_TOKENS, None)
             if raw_cache is not None:
                 raw_cache[key] = text
         logger.info("llm answered %d questions in %.1fs", n, time.perf_counter() - t0)
@@ -312,6 +369,12 @@ def spans_for(segments: Sequence[Dict], question: str, quote: str, seg: Optional
         span = span_from_segments(segments, ids)
     if span is not None and pad:
         span = (round(max(0.0, span[0] - pad), 2), round(span[1] + pad, 2))
+    if span is not None and SPAN_STRATEGY.get("snap", 1) and segments:
+        sil = segments[0].get("_silences")
+        if sil:
+            span = snap_span(tuple(span), sil,
+                             float(SPAN_STRATEGY.get("snap_start_tol", 0.6)),
+                             float(SPAN_STRATEGY.get("snap_end_tol", 0.3)))
     return span
 
 

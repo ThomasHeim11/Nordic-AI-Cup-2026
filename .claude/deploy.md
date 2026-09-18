@@ -33,6 +33,11 @@ URL to paste = tunnel URL + `/predict`, e.g. `https://xxxx.trycloudflare.com/pre
 Order of buttons: **Verify** → **Queue validation attempt** (unlimited) → **Evaluate** (ONE per challenge).
 Survival evaluation runs 3 simulations back to back → keep the server up for ~15 min.
 
+## venvs after the folder move
+The three `.venv`s were created under the old `Nordic-AI-Cup-2026/` path, so their `pip`
+launcher scripts have a dead absolute path. `./.venv/bin/python` still works; install with
+`./.venv/bin/python -m pip install …` (never `./.venv/bin/pip`).
+
 ## Memory — the Mac has 16 GB and that is the binding constraint
 - Medical server ≈ 6 GB (Qwen-7B-4bit + whisper-turbo), drone ≈ 1.5 GB, survival ≈ 0.2 GB.
   All three servers together fit **only if nothing else runs** (no training, no evolver, no evals).

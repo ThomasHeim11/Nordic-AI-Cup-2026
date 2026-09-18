@@ -111,5 +111,12 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
 - [x] First official validation run (18 Sep ~19:40–19:52): 19/19 conversations answered,
       21.8–44.1 s each, no timeouts (Mac must be free of heavy browser tabs: they push Qwen
       into swap and triple the latency). Score: see scoreboard.
+- [x] Gold spans = whole utterances; starts sit at speech onset after a silence (±0.05 s), whisper
+      word starts are 0.2–0.4 s early. Silence-based snapping added (`snap_span`): 0.700 → 0.706.
+- [x] Loss decomposition on 195 yes-questions: 133 picked well (mean tIoU 0.74), 37 miss the
+      passage, 19 poor overlap, 10 zero. **Perfect selection ≈ tIoU 0.74 ≈ score 0.83 (3rd).**
+      → the lever is utterance *selection* → stronger LLM on the A40.
+- [ ] `backend_torch.py` (transformers, CUDA) + `MEDICAL_BACKEND=torch` routing, for Qwen2.5-32B
+      on the cluster. Needs the user to run it there; then compare against 0.706 offline.
 - [ ] Ideas: per-question prompts with KV-cache reuse; larger embedder for candidates;
       ask for line + quote in the re-rank pass; Qwen2.5-14B-4bit if latency allows (unlikely).
