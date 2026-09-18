@@ -47,6 +47,10 @@ def main():
     ap.add_argument("--rerank", type=int, default=0)
     ap.add_argument("--seg-sub-min", type=float, default=0.35)
     ap.add_argument("--rerank-quote", type=int, default=0)
+    ap.add_argument("--ce-weight", type=float, default=0.0, help="units mode: use the cross-encoder re-ranker")
+    ap.add_argument("--llm-bonus", type=float, default=1.5)
+    ap.add_argument("--rerank-bonus", type=float, default=1.0)
+    ap.add_argument("--unit-gap", type=float, default=0.2)
     ap.add_argument("--snap", type=int, default=1)
     ap.add_argument("--snap-start-tol", type=float, default=0.6)
     ap.add_argument("--snap-end-tol", type=float, default=0.3)
@@ -55,7 +59,8 @@ def main():
     import pipeline
     from utils import group_questions_by_conversation, gold_evidence, temporal_iou
 
-    pipeline.SPAN_STRATEGY.update({"mode": a.mode, "pad": a.pad, "rerank": a.rerank, "seg_sub_min": a.seg_sub_min, "rerank_quote": a.rerank_quote, "snap": a.snap, "snap_start_tol": a.snap_start_tol, "snap_end_tol": a.snap_end_tol})
+    pipeline.SPAN_STRATEGY.update({"mode": a.mode, "pad": a.pad, "rerank": a.rerank, "seg_sub_min": a.seg_sub_min, "rerank_quote": a.rerank_quote, "snap": a.snap, "snap_start_tol": a.snap_start_tol, "snap_end_tol": a.snap_end_tol,
+                                   "ce_weight": a.ce_weight, "llm_bonus": a.llm_bonus, "rerank_bonus": a.rerank_bonus, "unit_gap": a.unit_gap})
     raw_path = os.path.join(HERE, "cache", "llm_raw.json")
     raw_cache = json.load(open(raw_path)) if os.path.exists(raw_path) else {}
     convs = group_questions_by_conversation()

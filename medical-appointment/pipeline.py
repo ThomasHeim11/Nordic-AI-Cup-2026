@@ -266,6 +266,12 @@ def answer_all(segments: Sequence[Dict], questions: Sequence[str], deadline: Opt
                raw_cache: Optional[Dict[str, str]] = None):
     """Return (answers, spans) from one LLM call.  Never raises."""
     n = len(questions)
+    if SPAN_STRATEGY.get("mode") == "units":
+        try:
+            import units_mode
+            return units_mode.answer_all_units(segments, questions, deadline, raw_cache, SPAN_STRATEGY)
+        except Exception:
+            logger.exception("units mode failed; falling back to quote mode")
     if deadline is not None and time.perf_counter() > deadline - MAIN_RESERVE:
         logger.warning("no time for the LLM (%.1fs left); lexical answers", deadline - time.perf_counter())
         parsed = [(None, None, "") for _ in range(n)]
