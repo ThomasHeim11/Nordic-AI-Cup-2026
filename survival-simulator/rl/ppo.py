@@ -161,6 +161,9 @@ def main():
     ap.add_argument("--entropy", type=float, default=0.001)
     ap.add_argument("--ckpt-every", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--init-log-std", type=float, default=-2.3,
+                    help="exploration noise at start (log std of the Gaussian heads); the clone only "
+                         "learned the means, and the model's default of -1.0 (~±66 deg per tick) wrecks it")
     a = ap.parse_args()
 
     dev = "cuda" if torch.cuda.is_available() else "cpu"
@@ -168,6 +171,9 @@ def main():
     if a.init and os.path.exists(a.init):
         net.load_state_dict(torch.load(a.init, map_location=dev))
         print("initialised from", a.init)
+    with torch.no_grad():
+        net.log_std.fill_(a.init_log_std)
+    print(f"exploration log_std set to {a.init_log_std:.2f} (std {float(torch.exp(net.log_std[0])):.3f})")
     opt = torch.optim.Adam(net.parameters(), lr=a.lr)
     os.makedirs(a.out, exist_ok=True)
     vec = VecSim(a.envs, a.seed)
