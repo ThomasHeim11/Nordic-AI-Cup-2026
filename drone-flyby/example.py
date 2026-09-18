@@ -30,13 +30,16 @@ import numpy as np
 from dtos import (
     IMAGE_HEIGHT,
     IMAGE_WIDTH,
+    MAXIMUM_CENTER_DELTA_PIXELS,
     OBJECT_CLASSES,
+    SOURCE_REGION_SIZES,
     DroneFlybyPredictionDto,
     DroneFlybyPredictRequestDto,
     DroneFlybyPredictResponseDto,
     RequestedViewDto,
 )
-from utils import clip_bbox_to_frame, decode_view, describe_camera_rejection, source_bbox_to_global
+from utils import (center_bounds_for_level, clip_bbox_to_frame, decode_view,
+                   describe_camera_rejection, source_bbox_to_global)
 
 ALLOWED_LEVELS_FROM = {0: (0, 1), 1: (0, 1, 2), 2: (1, 2)}
 
@@ -295,6 +298,16 @@ class CameraPlan:
     last_frame: int = -1
     last_dive_frame: int = -100
     dive_target: Optional[int] = None   # id(track) being dived on
+    # True camera state.  The request's view can be STALE: frames are emitted
+    # on a clock and a frame rendered before our previous command was applied
+    # still carries the old view.  The evaluator applies our command when the
+    # response arrives, so the true state is our last command unless
+    # camera_command_feedback says it was refused.
+    cam_level: int = 0
+    cam_cx: int = 1920
+    cam_cy: int = 1080
+    pending: Optional[Tuple[int, int, int]] = None
+    pending_frame: int = -1
 
 
 # Level-1 tiles that cover the whole frame (centres), visited once at the start.
@@ -321,25 +334,54 @@ def choose_next_view(request: DroneFlybyPredictRequestDto, plan: CameraPlan,
     camera wherever it was.  So every command is re-checked with the same rules
     the evaluator applies, and an illegal one is replaced by a hold.
     """
-    view = request.view
+    _sync_camera_state(request, plan)
     req = _choose_next_view(request, plan, tracker)
     if req is None:
         return None
-    reason = describe_camera_rejection(view.resolution_level, (view.center_x, view.center_y),
+    reason = describe_camera_rejection(plan.cam_level, (plan.cam_cx, plan.cam_cy),
                                        req.resolution_level, (req.center_x, req.center_y))
-    if reason is None:
-        return req
-    logger.warning("suppressed illegal camera command %s: %s", req, reason)
-    return None
+    if reason is not None:
+        logger.warning("suppressed illegal camera command %s from true state L%d (%d,%d): %s",
+                       req, plan.cam_level, plan.cam_cx, plan.cam_cy, reason)
+        return None
+    plan.pending = (req.resolution_level, req.center_x, req.center_y)
+    plan.pending_frame = request.frame
+    return req
+
+
+def _sync_camera_state(request: DroneFlybyPredictRequestDto, plan: CameraPlan) -> None:
+    """Bring plan.cam_* up to date before deciding the next move."""
+    v = request.view
+    fb = request.camera_command_feedback
+    if request.frame_index == 0 or plan.pending is None and plan.pending_frame < 0:
+        plan.cam_level, plan.cam_cx, plan.cam_cy = v.resolution_level, v.center_x, v.center_y
+    if plan.pending is not None:
+        refused = fb is not None and fb.frame == plan.pending_frame
+        if not refused:
+            plan.cam_level, plan.cam_cx, plan.cam_cy = plan.pending
+        plan.pending = None
+    # If the view we were sent already reflects a newer state than we think
+    # (should not happen, but the view is ground truth when it is fresher),
+    # trust a view whose position equals a command we sent.
+    if (v.resolution_level, v.center_x, v.center_y) == (plan.cam_level, plan.cam_cx, plan.cam_cy):
+        return
 
 
 def _choose_next_view(request: DroneFlybyPredictRequestDto, plan: CameraPlan,
                       tracker: Optional["Tracker"] = None) -> Optional[RequestedViewDto]:
-    constraints = request.camera_constraints
-    view = request.view
-    level = view.resolution_level
-    cx, cy = view.center_x, view.center_y
-    limit = constraints.maximum_center_delta
+    level = plan.cam_level
+    cx, cy = plan.cam_cx, plan.cam_cy
+    limit = MAXIMUM_CENTER_DELTA_PIXELS[level]
+
+    class _B:                      # bounds object with the same fields the DTO has
+        def __init__(self, lvl):
+            self.minimum_center_x, self.maximum_center_x, self.minimum_center_y, self.maximum_center_y = center_bounds_for_level(lvl)
+
+    class _C:
+        @staticmethod
+        def bounds_for_level(lvl):
+            return _B(lvl) if lvl in SOURCE_REGION_SIZES else None
+    constraints = _C()
 
     def clamp_to(level_target, x, y):
         b = constraints.bounds_for_level(level_target)
@@ -358,7 +400,7 @@ def _choose_next_view(request: DroneFlybyPredictRequestDto, plan: CameraPlan,
         s = max_step / d
         return cx + dx * s, cy + dy * s
 
-    allowed = set(constraints.allowed_resolution_levels)
+    allowed = set(ALLOWED_LEVELS_FROM[level])
 
     if plan.phase == "init":
         # First frame arrives at L0.  Step to L1 and start the tile tour.
@@ -445,7 +487,9 @@ def _choose_next_view(request: DroneFlybyPredictRequestDto, plan: CameraPlan,
 _SEQ: Dict[str, Tuple[Tracker, CameraPlan]] = {}
 
 
-def _state(sequence_id: str):
+def _state(sequence_id: str, frame_index: int = -1):
+    if frame_index == 0 and sequence_id in _SEQ:
+        del _SEQ[sequence_id]          # a sequence restarted under the same id
     if sequence_id not in _SEQ:
         if len(_SEQ) > 8:
             _SEQ.clear()
@@ -453,8 +497,37 @@ def _state(sequence_id: str):
     return _SEQ[sequence_id]
 
 
+RECORD_DIR = os.environ.get("DRONE_RECORD_DIR", os.path.join(HERE, "recordings"))
+
+
+def _record(request: DroneFlybyPredictRequestDto, response: DroneFlybyPredictResponseDto) -> None:
+    """Keep every incoming view and our answer: the validation sequence is the
+    only unseen scene we get, and the README allows recording it."""
+    try:
+        import base64, json
+        d = os.path.join(RECORD_DIR, request.sequence_id.replace("/", "_")[:40])
+        os.makedirs(d, exist_ok=True)
+        v = request.view
+        stem = f"{request.frame:04d}_L{v.resolution_level}_{v.center_x}_{v.center_y}"
+        with open(os.path.join(d, stem + ".png"), "wb") as f:
+            f.write(base64.b64decode(v.image))
+        meta = request.model_dump()
+        meta["view"]["image"] = None
+        meta["response"] = json.loads(response.model_dump_json())
+        with open(os.path.join(d, stem + ".json"), "w") as f:
+            json.dump(meta, f)
+    except Exception:
+        logger.exception("recording failed")
+
+
 def predict(request: DroneFlybyPredictRequestDto) -> DroneFlybyPredictResponseDto:
-    tracker, plan = _state(request.sequence_id)
+    response = _predict(request)
+    _record(request, response)
+    return response
+
+
+def _predict(request: DroneFlybyPredictRequestDto) -> DroneFlybyPredictResponseDto:
+    tracker, plan = _state(request.sequence_id, request.frame_index)
     if request.camera_command_feedback is not None:
         logger.warning("camera command from frame %s ignored: %s",
                        request.camera_command_feedback.frame, request.camera_command_feedback.reason)

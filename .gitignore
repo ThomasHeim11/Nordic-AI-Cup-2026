@@ -12,3 +12,4 @@ drone-flyby/data/yolo/
 drone-flyby/weights/
 *.pt
 drone-flyby/annotated/
+drone-flyby/recordings/
