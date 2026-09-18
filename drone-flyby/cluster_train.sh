@@ -24,6 +24,22 @@ YAML
 echo "== baseline on recorded frames (current weights) =="
 ./.venv/bin/python check_recordings.py --weights weights/best.pt --limit 60 --out debug/check_old || true
 
+# round 2: bash cluster_train.sh round2 <weights.pt>  -> pseudo-label recordings, retrain from those weights
+if [ "$1" = "round2" ]; then
+  ./.venv/bin/python pseudo_label.py --weights "$2" --recordings recordings --out data/pseudo --conf 0.55 --low 0.15
+  cat > data/combined2.yaml <<YAML
+path: $(pwd)/data
+train: [yolo/images/train, synth/images/train, pseudo/images/train]
+val: [yolo/images/val, synth/images/val]
+names:
+YAML
+  ./.venv/bin/python -c "from dtos import OBJECT_CLASSES as C; print(''.join(f'  {i}: {n}\n' for i,n in enumerate(C)))" >> data/combined2.yaml
+  ./.venv/bin/python train_yolo.py --model "$2" --data data/combined2.yaml --epochs 25 --imgsz 960 --batch 16 --device 0 --name round2 --workers 0 --amp 1 --lr0 0.003
+  ./.venv/bin/python check_recordings.py --weights runs/detect/runs/round2/weights/best.pt --limit 60 --out debug/check_round2 || true
+  echo "== round2 done: runs/detect/runs/round2/weights/best.pt =="
+  exit 0
+fi
+
 for M in yolo11s yolo11m yolo11l; do
   echo "== training $M =="
   ./.venv/bin/python train_yolo.py --model $M.pt --data data/combined.yaml --epochs 40 --imgsz 960 --batch 16 --device 0 --name synth_$M --workers 8 --amp 1

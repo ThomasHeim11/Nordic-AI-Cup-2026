@@ -25,6 +25,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+import cv2
 import numpy as np
 
 from dtos import (
@@ -130,13 +131,99 @@ DETECTOR = Detector()
 # Tracker
 # --------------------------------------------------------------------------- #
 
-def advance(cx, cy, w, h, steps: int):
+def advance(cx, cy, w, h, steps: int, H=None):
     """Dead-reckon a box through ``steps`` frames by warping its corners."""
     x1, y1, x2, y2 = cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2
     for _ in range(steps):
-        x1, y1 = warp_point(x1, y1)
-        x2, y2 = warp_point(x2, y2)
+        x1, y1 = warp_point(x1, y1, H)
+        x2, y2 = warp_point(x2, y2, H)
     return (x1 + x2) / 2, (y1 + y2) / 2, max(1.0, x2 - x1), max(1.0, y2 - y1)
+
+
+class MotionEstimator:
+    """Online estimate of the per-frame ground motion, in source pixels.
+
+    The fitted Helsinki matrix is only a prior: the evaluation drone may fly
+    another heading.  Consecutive views at the same zoom level are registered
+    with ORB features (mapped through their source regions, so the camera's
+    own moves cancel out) and a RANSAC affine; plausible estimates are blended
+    into the running matrix.  Thousands of inliers per pair on the recorded
+    validation scene, so this converges within a few frames.
+    """
+
+    # Switch from the prior to the online estimate only when they disagree by
+    # more than this at the frame centre (px/frame) or in scale; on a scene the
+    # prior was fitted for, the prior is exact and the estimate is only noise.
+    DISAGREE_PX = 10.0
+    DISAGREE_SCALE = 0.006
+
+    def __init__(self, prior):
+        self.prior = np.array(prior, dtype=np.float64).copy()
+        self.online = self.prior.copy()
+        self.H = self.prior.copy()
+        self.using_online = False
+        self.last = None                      # (frame, level, region, gray)
+        self.orb = cv2.ORB_create(1500)
+        self.bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+        self.accepted = 0
+
+    def _choose(self) -> None:
+        c = np.array([1920.0, 1080.0, 1.0])
+        dp, do = self.prior @ c, self.online @ c
+        shift = float(np.hypot(dp[0] - do[0], dp[1] - do[1]))
+        scale = float(max(abs(self.prior[0, 0] - self.online[0, 0]), abs(self.prior[1, 1] - self.online[1, 1])))
+        want_online = self.accepted >= 2 and (shift > self.DISAGREE_PX or scale > self.DISAGREE_SCALE)
+        if want_online != self.using_online:
+            logger.info("motion model: %s (disagreement %.1f px, scale %.4f)",
+                        "ONLINE estimate" if want_online else "fitted prior", shift, scale)
+        self.using_online = want_online
+        self.H = self.online if want_online else self.prior
+
+    @staticmethod
+    def _to_src(pts, region):
+        x1, y1, x2, y2 = region
+        sx, sy = (x2 - x1) / 960.0, (y2 - y1) / 540.0
+        return np.column_stack([x1 + pts[:, 0] * sx, y1 + pts[:, 1] * sy]).astype(np.float32)
+
+    def update(self, frame: int, level: int, region, image_bgr) -> None:
+        gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+        try:
+            if self.last is not None:
+                f0, l0, r0, g0 = self.last
+                k = frame - f0
+                if 1 <= k <= 3 and l0 == level:
+                    self._register(g0, r0, gray, region, k)
+        except Exception:
+            logger.exception("motion estimation failed")
+        self.last = (frame, level, region, gray)
+
+    def _register(self, g0, r0, g1, r1, k: int) -> None:
+        k0, d0 = self.orb.detectAndCompute(g0, None)
+        k1, d1 = self.orb.detectAndCompute(g1, None)
+        if d0 is None or d1 is None or len(k0) < 50 or len(k1) < 50:
+            return
+        m = self.bf.match(d0, d1)
+        if len(m) < 40:
+            return
+        P0 = self._to_src(np.float32([k0[x.queryIdx].pt for x in m]), r0)
+        P1 = self._to_src(np.float32([k1[x.trainIdx].pt for x in m]), r1)
+        A, inl = cv2.estimateAffine2D(P0, P1, ransacReprojThreshold=6.0, method=cv2.RANSAC)
+        if A is None or inl is None or int(inl.sum()) < 60:
+            return
+        # k-frame motion -> per-frame (first-order: the motion is near identity)
+        M = np.eye(2) + (A[:, :2] - np.eye(2)) / k
+        t = A[:, 2] / k
+        shift = float(np.hypot(*(M @ np.array([1920.0, 1080.0]) + t - np.array([1920.0, 1080.0]))))
+        if not (10.0 <= shift <= 250.0) or not (0.96 <= M[0, 0] <= 1.06 and 0.96 <= M[1, 1] <= 1.06) \
+                or abs(M[0, 1]) > 0.05 or abs(M[1, 0]) > 0.05:
+            return
+        A1 = np.eye(3)
+        A1[:2, :2] = M
+        A1[:2, 2] = t
+        alpha = 0.5 if self.accepted < 5 else 0.2        # converge fast, then smooth
+        self.online = (1 - alpha) * self.online + alpha * A1
+        self.accepted += 1
+        self._choose()
 
 
 def iou_xyxy(a, b) -> float:
@@ -169,10 +256,10 @@ class Track:
     def box(self):
         return (self.cx - self.w / 2, self.cy - self.h / 2, self.cx + self.w / 2, self.cy + self.h / 2)
 
-    def predict_to(self, frame: int):
+    def predict_to(self, frame: int, H=None):
         steps = frame - self.frame
         if steps > 0:
-            self.cx, self.cy, self.w, self.h = advance(self.cx, self.cy, self.w, self.h, steps)
+            self.cx, self.cy, self.w, self.h = advance(self.cx, self.cy, self.w, self.h, steps, H)
             self.frame = frame
 
 
@@ -186,14 +273,22 @@ REPORT_MIN_CONF = 0.08
 DUPLICATE_IOU = 0.55
 
 
+MAX_REPORT = 80
+REPORT_NMS_IOU = 0.6
+
+
 class Tracker:
     def __init__(self):
         self.tracks: List[Track] = []
+        self.motion = MotionEstimator(MOTION_H)
 
-    def step(self, frame: int, level: int, region, detections):
+    def step(self, frame: int, level: int, region, detections, image=None):
         """detections: list of (cls, conf, x1, y1, x2, y2) in SOURCE pixels."""
+        if image is not None:
+            self.motion.update(frame, level, region, image)
+        H = self.motion.H
         for t in self.tracks:
-            t.predict_to(frame)
+            t.predict_to(frame, H)
         # Drop what has left the frame.
         self.tracks = [t for t in self.tracks if t.cy - t.h / 2 < IMAGE_HEIGHT + 20 and t.conf > 0.02]
 
@@ -283,7 +378,16 @@ class Tracker:
             if conf < REPORT_MIN_CONF:
                 continue
             out.append((OBJECT_CLASSES[t.cls], t.box(), conf))
-        return out
+        # The scorer applies no NMS: two boxes on one object are one hit and
+        # one false positive.  Class-agnostic suppression, best first, then cap.
+        out.sort(key=lambda r: r[2], reverse=True)
+        kept: List[Tuple[str, Tuple[float, float, float, float], float]] = []
+        for r in out:
+            if all(iou_xyxy(r[1], k[1]) < REPORT_NMS_IOU for k in kept):
+                kept.append(r)
+            if len(kept) >= MAX_REPORT:
+                break
+        return kept
 
 
 # --------------------------------------------------------------------------- #
@@ -542,7 +646,7 @@ def _predict(request: DroneFlybyPredictRequestDto) -> DroneFlybyPredictResponseD
         dets = []
         for k, c, x1, y1, x2, y2 in DETECTOR(image):
             dets.append((k, c, rx1 + x1 * sx, ry1 + y1 * sy, rx1 + x2 * sx, ry1 + y2 * sy))
-        tracker.step(request.frame, request.view.resolution_level, region, dets)
+        tracker.step(request.frame, request.view.resolution_level, region, dets, image=image)
 
         for name, box, conf in tracker.report():
             g = clip_bbox_to_frame(source_bbox_to_global(box, request.original_width, request.original_height))

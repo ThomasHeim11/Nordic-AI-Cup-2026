@@ -97,7 +97,13 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
          hangar + 5 planes in plain view. Fix in progress: `make_synth.py` copy-paste dataset
          (Helsinki object patches onto recorded validation backgrounds), `cluster_train.sh`
          trains yolo11s/m on the A40, `check_recordings.py` sanity-checks on the recordings.
-- [ ] Ideas: online refit of the homography from matched detections; TTA; conf threshold sweep.
+- [x] **Online motion estimation** (`MotionEstimator` in example.py): ORB + RANSAC affine between
+      consecutive same-level views in source coordinates; prior kept unless the estimate disagrees
+      (> 10 px/frame or scale > 0.006). Helsinki stays 0.903; reversed-heading test switches correctly.
+      Recorded validation scene measured: dy +68 px/frame ≈ Helsinki (+65).
+- [x] Report hygiene: class-agnostic NMS (IoU 0.6) + cap 80 per frame (neutral on Helsinki).
+- [x] `pseudo_label.py` + `cluster_train.sh round2 <weights>`: self-training on recorded views.
+- [ ] Per-class confidence thresholds from the recordings once the new detector exists; TTA.
 
 ### Challenge 3 — Medical  (pipeline works; quote-based evidence being evaluated)
 - [x] ASR: mlx-whisper large-v3-turbo via MLX, PyAV decoding (no ffmpeg). Excellent transcripts.
