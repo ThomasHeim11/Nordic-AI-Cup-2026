@@ -47,7 +47,8 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
       Defaults set accordingly (18:15), server restarted with the new code.
 - [x] B1 endgame (18 Sep 23:30): species clock + `population_target(t)` ramp (spawn_max_pop →
       late_pop between late_t0 and late_t1), ripening-aware harvest (`hungry_frac`), elders capped
-      by carrying capacity. Benchmarking on 24 maps (`bm_b1.log`).
+      by carrying capacity. **24 maps: 1002 mean, sd 202, min 510** (was 950 / 304 / 467). Kept.
+      Mac survival server restarted on it (23:55).
 - [x] B2 RL groundwork (`rl/`): features.py (85-dim egocentric vector), model.py (shared
       actor-critic MLP, 0.18 ms/tick for 30 animals), bc_collect.py / bc_train.py (behaviour cloning
       from the heuristic), policy_nn.py (drop-in `decide_all`), ppo.py (own PPO: parallel simulators,

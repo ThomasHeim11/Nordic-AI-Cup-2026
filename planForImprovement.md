@@ -59,7 +59,8 @@ instead of the Helsinki-fitted homography — the evaluation flight direction ma
 | When | Owner | Step |
 |---|---|---|
 | Fri night | done | cluster + home hosting measured (60 / 80 ms per tick) |
-| Sat morning | Claude | B1 endgame rewrite, measured on 24 maps on the cluster |
+| Fri 23:50 | done | B1 endgame rewrite: 1002 mean on 24 maps (was 950), variance down |
+| Fri 23:50 | done | B2 code complete and smoke-tested (features, actor-critic, BC, PPO, cluster runner) |
 | Sat midday | Claude | RL groundwork: env wrapper, features, BC data + training on A40; go/no-go |
 | Sat afternoon → Sun morning | cluster | PPO, hourly checkpoints scored on 24 maps |
 | Sat afternoon | both | hosting: small-population run, delayed-ACK off, Ethernet if available; re-validate |
