@@ -42,7 +42,7 @@ fi
 
 for M in yolo11s yolo11m yolo11l; do
   echo "== training $M =="
-  ./.venv/bin/python train_yolo.py --model $M.pt --data data/combined.yaml --epochs 40 --imgsz 960 --batch 16 --device 0 --name synth_$M --workers 8 --amp 1
+  ./.venv/bin/python train_yolo.py --model $M.pt --data data/combined.yaml --epochs 40 --imgsz 960 --batch 16 --device 0 --name synth_$M --workers 0 --amp 1
   ./.venv/bin/python check_recordings.py --weights runs/detect/runs/synth_$M/weights/best.pt --limit 60 --out debug/check_$M || true
 done
 echo "== done. weights: runs/detect/runs/synth_yolo11s/weights/best.pt  runs/detect/runs/synth_yolo11m/weights/best.pt =="
