@@ -13,3 +13,6 @@ drone-flyby/weights/
 *.pt
 drone-flyby/annotated/
 drone-flyby/recordings/
+drone-flyby/data/
+drone-flyby/runs/
+medical-appointment/models/
