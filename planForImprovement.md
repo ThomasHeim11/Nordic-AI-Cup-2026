@@ -141,3 +141,49 @@ Organizers: evaluation flight direction and object appearance "may differ" from 
 - `check_recordings` shows sensible per-class counts; 0 refused camera commands; 0 skipped frames.
 
 # Task3
+
+## Plan for max points — Medical Appointment
+
+Target: 0.4·accuracy + 0.6·evidence tIoU on 38 unseen conversations. Validation leader 1.000 / 0.992
+(two teams; validation audio is *not* in the training set, so these are earned) · 3rd 0.830 · 5th 0.800 ·
+10th 0.780. We: **0.698** (offline 0.706), rank ~30 on this task.
+
+### What we have
+- Local pipeline on the Mac: whisper-large-v3-turbo (MLX) with word timestamps → Qwen2.5-7B (MLX)
+  answers all 10 questions in one prompt and quotes its evidence → quote located on word timestamps →
+  second LLM pass re-ranks candidate lines → span tightened to the fact-bearing words → silence-based
+  boundary snapping. Budget-aware server (drops the re-rank, then the LLM, if time runs out); 22–44 s
+  per conversation online, 0 timeouts.
+- Accuracy 0.977 — answering is solved. Evidence tIoU 0.52 — that is the whole gap.
+- Findings: gold spans are whole utterances (start at speech onset, ±0.05 s); a perfect *choice* of
+  utterance with our boundaries would give tIoU ≈ 0.74 → score ≈ 0.83 (3rd). Selection is 68 %
+  right today, 19 % pick the wrong passage entirely.
+
+### What we do (ordered by expected gain)
+1. **Stronger selector on the A40** — the same pipeline with `MEDICAL_BACKEND=torch`
+   (`backend_torch.py`, HF transformers): Qwen2.5-14B (fits in bf16) or 32B (AWQ/GPTQ if it installs)
+   for the answer + re-rank passes. Offline score on the 39 training conversations via
+   `cluster_medical.sh eval` (≈ 0.706 to beat). Bigger model ≈ better literal-passage choice.
+2. **Utterance units as the choice set**: segment the audio into utterances by silence (we already
+   detect them), and let the LLM pick unit ids (allowing 1–3 consecutive units) instead of free
+   quotes — the answer space then matches the annotation convention exactly.
+3. **Boundary polish**: start = speech onset after silence (done), end = last word end (done);
+   measure per-utterance ASR drift and correct systematically.
+4. **Latency on the cluster**: whisper + a 14B model on the A40 should be ~10–15 s per conversation,
+   leaving room for a third pass (self-consistency: ask twice, keep agreeing spans).
+5. **Serve from the cluster** (`cluster_medical.sh serve` / tunnel) — no memory pressure, no swap;
+   Mac stays the fallback with the 7B pipeline.
+
+### Timeline
+| When | Step |
+|---|---|
+| Sat morning | `cluster_medical.sh eval` with 14B (and 32B if it loads) → compare with 0.706 |
+| Sat midday | utterance-unit selection prompt; re-evaluate offline; keep the best |
+| Sat afternoon | serve from the cluster; validation run (unlimited) |
+| Sat evening | self-consistency pass if time allows; freeze |
+| Sun ~14 | final evaluation (one attempt) |
+
+### Definition of done
+- Offline ≥ 0.80 on the 39 training conversations; validation ≥ 0.80 (top-3 territory).
+- Worst-case conversation < 45 s; 0 timeouts on two validation runs.
+

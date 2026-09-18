@@ -111,6 +111,17 @@ class Detector:
         """Return (class_index, conf, x1, y1, x2, y2) in view pixels."""
         if self.model is None:
             return []
+        out = self._run(image)
+        if TTA_FLIP:
+            # Top-down imagery: a mirrored view is an equally valid view.  Run
+            # the flipped image too and merge (ultralytics' augment=True does
+            # the same idea; done explicitly here so the merge is ours).
+            w = image.shape[1]
+            flipped = self._run(np.ascontiguousarray(image[:, ::-1]))
+            out = _merge_tta(out + [(k, c, w - x2, y1, w - x1, y2) for k, c, x1, y1, x2, y2 in flipped])
+        return out
+
+    def _run(self, image: np.ndarray):
         results = self.model.predict(image, imgsz=IMGSZ, conf=CONF_THRESHOLD, iou=NMS_IOU,
                                      device=self.device, verbose=False, max_det=200)
         out = []
@@ -123,6 +134,24 @@ class Detector:
             for (x1, y1, x2, y2), c, k in zip(xyxy, conf, cls):
                 out.append((int(k), float(c), float(x1), float(y1), float(x2), float(y2)))
         return out
+
+
+TTA_FLIP = os.environ.get("DRONE_TTA", "0") == "1"
+
+
+def _merge_tta(dets, iou_thr: float = 0.55):
+    """Greedy merge of detections from two passes: overlapping boxes of the
+    same class become one box with the max confidence and averaged corners."""
+    dets = sorted(dets, key=lambda d: d[1], reverse=True)
+    merged = []
+    for d in dets:
+        for i, m in enumerate(merged):
+            if m[0] == d[0] and iou_xyxy(m[2:], d[2:]) >= iou_thr:
+                merged[i] = (m[0], max(m[1], d[1]), (m[2] + d[2]) / 2, (m[3] + d[3]) / 2, (m[4] + d[4]) / 2, (m[5] + d[5]) / 2)
+                break
+        else:
+            merged.append(d)
+    return merged
 
 
 DETECTOR = Detector()
