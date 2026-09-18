@@ -71,3 +71,58 @@ instead of the Helsinki-fitted homography — the evaluation flight direction ma
 - Validation ≥ 1800 s from the final host, repeated twice.
 - Mean over 24 local maps ≥ 1900 s.
 - Training code + model saved in the repo (top-5 must hand it in by Sun 20:00).
+
+---
+
+# Plan for max points — Drone Flyby
+
+Target: mAP@0.50 on an unseen 250-frame sequence. Validation leader 0.830 · 5th 0.749 · 10th 0.485. We: 0.005.
+
+## What we have
+- Pipeline: YOLO detector on the 960×540 view → boxes lifted to the 4K frame → **tracker** that
+  dead-reckons every object with a per-frame homography (objects stay reported ~20 frames after one
+  sighting) → **camera policy** (L0 → four L1 tiles → L1 sweep of the entry band + L2 dives on small /
+  uncertain tracks), every command checked against the rules, true camera state tracked.
+- Local score on the Helsinki scene: 0.25 (baseline) → **0.90**. 58 ms/frame on the Mac.
+- Recording of every validation frame (`recordings/`, 182 frames of the unseen terrain).
+
+## Why validation gave 0.005
+1. **Detector did not generalize** — trained on 25 frames of one orthophoto scene; the validation
+   scene is Google-Earth-style 3D texture. It fired ~2000 `ta-ta` on bushes/cars and missed a hangar
+   and five aircraft in plain view.
+2. **28 % of frames skipped** — 1.4 MB per frame through the home tunnel exceeded the 333 ms interval.
+3. **Camera commands refused** — request views can be stale; fixed (true camera state kept).
+Organizers: evaluation flight direction and object appearance "may differ" from validation.
+
+## What we do (ordered by expected gain)
+1. **Detector that generalizes** (the big one)
+   - Copy-paste synthetic data: Helsinki object cut-outs pasted at correct scale onto the recorded
+     validation terrain + Helsinki backgrounds, empty crops as negatives (`make_synth.py`, 4000 imgs).
+     Training yolo11 s / m / l on the A40 — running overnight (`cluster_train.sh`).
+   - Pick by `check_recordings.py` (what each model sees on the unseen frames: a healthy model finds
+     a handful of confident objects per frame, not hundreds of one class) + Helsinki val.
+   - Round 2: **pseudo-label** the recorded validation frames with the best model (high-confidence
+     boxes only) and retrain — real terrain, real object renderings.
+   - Heavier augmentation (colour/blur/JPEG/scale), test-time flip augmentation if latency allows.
+2. **Serve from the cluster** (`drone_serve.sbatch` / `cluster_serve.sh`): university bandwidth ends the
+   frame skipping, and the A40 makes the large model affordable (~30 ms per frame vs 333 budget).
+3. **Online motion estimation**: register consecutive same-level views (feature matching / phase
+   correlation) to estimate the homography per sequence instead of assuming Helsinki's direction;
+   fall back to the fitted matrix. Required — the evaluation flight direction may differ.
+4. **Output hygiene**: per-class confidence thresholds learned from the recordings (kill the `ta-ta`
+   flood), class-agnostic duplicate suppression, cap detections per frame.
+5. **Validate after every model** (unlimited) and keep recording — every validation run adds 250 more
+   unseen-terrain frames for pseudo-labelling.
+
+## Timeline
+| When | Step |
+|---|---|
+| Sat morning | read s/m/l results → `check_recordings` → pick → serve from cluster → validate |
+| Sat midday | pseudo-label recordings → retrain → validate; per-class thresholds |
+| Sat afternoon | online motion estimation; re-validate |
+| Sat evening | freeze the model; two clean validation runs from the final host |
+| Sun ~14 | final evaluation (one attempt) |
+
+## Definition of done
+- Validation ≥ 0.75 (top-5); stretch ≥ 0.85 (1st).
+- `check_recordings` shows sensible per-class counts; 0 refused camera commands; 0 skipped frames.
