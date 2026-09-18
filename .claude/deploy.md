@@ -1,5 +1,16 @@
 # Deployment — how to get the three endpoints online
 
+## Survival: direct from the Mac via router port-forward (best latency we have)
+- Home line (Get/Telia) has a real public IP: `178.232.205.38`. Router: ASUS RT-N12E at 192.168.1.1
+  (admin password unknown; **UPnP is on**, which is how the forward was created).
+- Create/refresh the forward (survives until the router reboots):
+  `upnpc -a 192.168.1.22 9052 9052 TCP`   (brew install miniupnpc). Check: `upnpc -l`.
+- Submit URL: `http://178.232.205.38:9052` (plain http). Measured 17–37 ms/request from n009.
+- **VPN must be OFF on the Mac** (otherwise replies leave through the VPN and the port is dead).
+- Keep the Mac awake: `caffeinate -dims &`. Nothing heavy on the Mac during a run.
+- Cluster tunnel is the fallback (60 ms/tick → cut at ~1000 s).
+
+
 All three servers run on this Mac. Each one needs a **public URL**; the simplest is a
 Cloudflare quick tunnel (no account needed, installed via brew).
 

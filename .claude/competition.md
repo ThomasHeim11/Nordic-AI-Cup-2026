@@ -45,3 +45,18 @@ being excellent in one** — a mediocre entry still ranks and still scores point
   Apple-Silicon-friendly ASR: `mlx-whisper`, `whisper.cpp` (Metal), or `lightning-whisper-mlx`.
 - Open question: do we have an NVIDIA box / Azure-for-Students VM for hosting + training?
   Hosting is the bigger risk — the endpoint must be publicly reachable.
+
+## From Discord (18–19 Sep)
+- "The competition is not just about crafting the best algorithms, but also about systems engineering.
+  Whoever builds the best combination, wins." — hosting latency is intended to matter.
+- Survival: the 600 s accumulated-wait timer includes network round trip, resets between the 3
+  evaluation rounds, and a cut run keeps its score. Rule applies in the final evaluation.
+- Code is authoritative over README (move_direction is relative).
+- Drone: flight direction in evaluation "not necessarily" the same as validation; object appearance
+  from above "might differ". → motion model must be estimated online; detector must generalize.
+- A team lost its single drone evaluation to a 503 from a free ngrok tunnel — no retry granted.
+  → final run: fresh tunnel, external pre-check, nothing else on the server, hot standby ready.
+- Do not run validations from two teammates at once on the same use case.
+- Validation queues can stall; admins clear them on request in #challenge channels.
+- Cluster n009 has private IPs only (NAT egress 158.36.4.117); no inbound without admin port-forward.
+  Azure blocked by OsloMet policy; Oracle/paid VPS declined by the team.

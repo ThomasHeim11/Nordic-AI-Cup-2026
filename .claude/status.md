@@ -45,6 +45,14 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
 - [x] `bench_many.py` — parallel 24-seed A/B harness (6-seed tests were ±100 noise). Results:
       food gate + tree memory ON, dispersal/barren OFF = **950**; everything on = 889; all off = 883.
       Defaults set accordingly (18:15), server restarted with the new code.
+- [x] B1 endgame (18 Sep 23:30): species clock + `population_target(t)` ramp (spawn_max_pop →
+      late_pop between late_t0 and late_t1), ripening-aware harvest (`hungry_frac`), elders capped
+      by carrying capacity. Benchmarking on 24 maps (`bm_b1.log`).
+- [x] B2 RL groundwork (`rl/`): features.py (85-dim egocentric vector), model.py (shared
+      actor-critic MLP, 0.18 ms/tick for 30 animals), bc_collect.py / bc_train.py (behaviour cloning
+      from the heuristic), policy_nn.py (drop-in `decide_all`), ppo.py (own PPO: parallel simulators,
+      per-animal GAE, clipped objective), cluster_rl.sh (bc | ppo | eval). All smoke-tested on the Mac.
+      `bench_many.py --policy rl.policy_nn` scores checkpoints (weights via SURVIVAL_NN=...).
 - [ ] Late-game famine is still the killer (runs end 600–1300 s). Ideas not yet tried:
       time-aware population target (shrink with tree count), lineage-shared tree map,
       predator-count-aware camping.

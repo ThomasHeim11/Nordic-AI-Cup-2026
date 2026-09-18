@@ -60,6 +60,11 @@ PARAMS: Dict[str, float] = {
     # --- foraging ---
     "fruit_seek": 260.0,         # chase a fruit up to this distance
     "fruit_full_frac": 0.92,     # stop foraging above this fraction of max energy
+    "hungry_frac": 0.55,         # while camping a tree, only harvest below this (let fruit ripen)
+    # --- endgame population schedule ---
+    "late_pop": 6.0,             # population target once the food has collapsed
+    "late_t0": 500.0,            # start shrinking here (s)
+    "late_t1": 1300.0,           # reach late_pop here (s)
     "tree_seek": 420.0,
     "tree_camp": 60.0,           # within this of a tree we stop moving and wait
     "scan_turn": 0.22,           # idle scan rate (rad/tick); buys predator warning
@@ -115,11 +120,33 @@ load_params()
 # Per-agent scratch memory (wander heading).  Keyed by agent_id.
 _MEMORY: Dict[int, Dict[str, float]] = {}
 _RNG = random.Random(0xC0FFEE)
+# Species clock: one decide_all call per simulator tick (0.1 s).  The request
+# does not carry the sim time per agent, so we count ticks ourselves.
+_CLOCK = {"t": 0.0}
 
 
 def reset() -> None:
     """Drop all per-run state.  Call between simulations."""
     _MEMORY.clear()
+    _CLOCK["t"] = 0.0
+
+
+def population_target(t: float, p: Dict[str, float]) -> float:
+    """How many animals the map can carry at time t.
+
+    Tree spawning halves every 300 s, so the food supply collapses from ~50
+    trees to ~3 by t~1000 s.  A population that stays large past that point
+    strips the map and mass-starves; the endgame is a few well-fed animals
+    breeding one replacement at a time.  Linear ramp from spawn_max_pop at
+    late_t0 down to late_pop at late_t1.
+    """
+    hi, lo = p["spawn_max_pop"], p["late_pop"]
+    t0, t1 = p["late_t0"], max(p["late_t1"], p["late_t0"] + 1.0)
+    if t <= t0:
+        return hi
+    if t >= t1:
+        return lo
+    return hi + (lo - hi) * (t - t0) / (t1 - t0)
 
 
 def _wrap(angle: float) -> float:
@@ -345,7 +372,12 @@ def decide(state: dict, may_spawn: bool, rng: random.Random, spawn_energy: float
         target = None
         idle = False
 
-        if fruits and energy < max_energy * p["fruit_full_frac"]:
+        # Ripening: fruit is worth 20 fresh and 60 after 20 s.  An animal parked
+        # at a tree should leave fruit on the ground until it is actually hungry;
+        # away from trees any fruit is worth the walk.
+        near_tree = min((o["distance"] for o in trees), default=float("inf"))
+        hungry = energy < max_energy * p["hungry_frac"]
+        if fruits and energy < max_energy * p["fruit_full_frac"] and (hungry or near_tree > p["tree_camp"]):
             f = min(fruits, key=lambda o: o["distance"])
             if f["distance"] <= p["fruit_seek"]:
                 target = f["angle"]
@@ -526,17 +558,23 @@ def decide_all(agent_states: Sequence[dict], rng: random.Random = None) -> List[
     n_fruit = sum(1 for s in states for o in s["observations"] if o.get("type") == "Fruit")
     n_tree = sum(1 for s in states for o in s["observations"] if o.get("type") == "Tree")
     food_index = (n_fruit + p["food_gate_tree_w"] * n_tree) / pop
+    t = _CLOCK["t"]
+    max_pop = population_target(t, p)
+    min_pop = min(p["spawn_min_pop"], max(2.0, max_pop - 1.0))
     threshold = p["spawn_energy"]
-    if pop <= p["spawn_min_pop"]:
+    if pop <= min_pop:
         breeders = live_ids                      # rebuild numbers first
         threshold = p["spawn_energy_low"]
-    elif pop >= p["spawn_max_pop"] or food_index < p["food_gate"]:
+    elif pop >= max_pop or food_index < p["food_gate"]:
         breeders = set()                         # the range is saturated / stripped
     else:
         scored = sorted(states, key=trait_score, reverse=True)
         keep = max(1, int(len(scored) * p["spawn_elite_frac"]))
         breeders = {s["agent_id"] for s in scored[:keep]}
-    elders_ok = pop < p["spawn_max_pop"] * p["elder_pop_slack"]
+    # Elders convert their soon-to-be-lost energy into a child, but never above
+    # the carrying capacity: late in the run that is one replacement at a time.
+    elders_ok = pop < max_pop * p["elder_pop_slack"]
+    _CLOCK["t"] += 0.1
 
     relayed = relay_threats(states)
     return [

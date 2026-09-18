@@ -12,15 +12,17 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def _worker(args):
-    overrides, seed = args
+    overrides, seed, policy_name = args
     sys.path.insert(0, HERE)
+    import importlib
     import bench
-    from src.utils.controllers import hivemind_policy as hp
+    hp = importlib.import_module(policy_name)
     if not getattr(bench, "_patched", False):      # once per worker process
         bench.patch_fast_biome_render()
         bench.patch_death_counter()
         bench._patched = True
-    hp.PARAMS.update(overrides)
+    if hasattr(hp, "PARAMS"):
+        hp.PARAMS.update(overrides)
     r = bench.run_one(hp, seed)
     return r
 
@@ -42,6 +44,8 @@ def main():
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--set", action="append", default=[])
     ap.add_argument("--tag", default="")
+    ap.add_argument("--policy", default="src.utils.controllers.hivemind_policy",
+                    help="policy module, e.g. rl.policy_nn (weights via SURVIVAL_NN=...)")
     a = ap.parse_args()
     overrides = {}
     for kv in a.set:
@@ -50,10 +54,11 @@ def main():
     seeds = parse_seeds(a.seeds)
     t0 = time.time()
     with Pool(a.workers) as pool:
-        results = pool.map(_worker, [(overrides, s) for s in seeds], chunksize=1)
+        results = pool.map(_worker, [(overrides, s, a.policy) for s in seeds], chunksize=1)
     scores = [r["score"] for r in results]
     summary = {
-        "tag": a.tag, "overrides": overrides, "n": len(scores),
+        "tag": a.tag, "policy": a.policy, "weights": os.environ.get("SURVIVAL_NN", ""),
+        "overrides": overrides, "n": len(scores),
         "mean": statistics.mean(scores), "stdev": statistics.stdev(scores) if len(scores) > 1 else 0.0,
         "min": min(scores), "max": max(scores),
         "starved": sum(r["starved"] for r in results), "eaten": sum(r["eaten"] for r in results),

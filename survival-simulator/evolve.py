@@ -49,6 +49,10 @@ BOUNDS = {
     "memory_ttl":          (30.0, 200.0),
     "memory_visit_radius": (20.0, 90.0),
     "memory_revisit_after":(5.0, 80.0),
+    "hungry_frac":         (0.2, 0.9),
+    "late_pop":            (2.0, 14.0),
+    "late_t0":             (200.0, 900.0),
+    "late_t1":             (600.0, 2000.0),
 }
 INT_KEYS = {"crowd_limit", "spawn_min_pop", "spawn_max_pop"}
 
