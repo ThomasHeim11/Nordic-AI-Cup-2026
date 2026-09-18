@@ -1,5 +1,14 @@
 # Status log
 
+## ⚠ Morning of 19 Sep — state to know before touching anything
+- Mac **medical server is OFF** (stopped 01:20 for memory). Restart before any validation:
+  `cd medical-appointment && nohup ./.venv/bin/python api.py > api_9054.log 2>&1 &` (its tunnel is still up).
+- Mac: insurance YOLO-small training on synthetic data may be running (`drone-flyby/train_mac_synth.log`).
+- Cluster: drone training was restarted alone (all stalls were GPU/CPU contention); survival evolver + PPO
+  are SIGSTOPped and auto-resume when the drone finishes; the medical 14B eval was killed → rerun after
+  the drone: `cd ~/medical-appointment && nohup bash cluster_medical.sh eval > ~/medical_eval.log 2>&1 &`.
+- Cluster allocation (job 1412535, n009) ends ~19:00 Sat.
+
 ## Scoreboard (official validation, 18 Sep evening)
 | challenge | score | limiting factor |
 |---|---|---|
@@ -141,8 +150,11 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
       conversation): 2 epochs + context 36 %; **6 epochs, no context: 68.7 % selection, tIoU 0.515** —
       on par with the LLM, different errors → combine. Defaults now context off / 6 epochs.
       Overnight: re-ranker trained on all 39 + three combined units+CE evaluations → `units_ce_eval.log`
-      (NOTE: that offline number is optimistic — the re-ranker saw the same conversations; the honest
-      estimate needs fold-wise models. Treat > 0.706 as promising, confirm on validation).
+      Result: units + CE = 0.690 / 0.695 / 0.682 (optimistic, same conversations) — **below 0.706**.
+      Units/CE route closed for the 7B; default stays quote + re-rank + snap. Lever = 14B on the A40.
+- [x] Drone cluster training stalled 4× (GPU/CPU contention, then even alone at batch 1 after kills);
+      stopped for the night. Insurance: Mac trains yolo11s on the synthetic data (`train_mac_synth.log`,
+      ~03:30). Morning: retry on a **fresh** allocation with the drone alone on the GPU.
 - [ ] Tomorrow on the A40: 14B (and 32B-4bit if it installs) in quote mode AND units mode; pick best.
 - [ ] Ideas: per-question prompts with KV-cache reuse; larger embedder for candidates;
       ask for line + quote in the re-rank pass; Qwen2.5-14B-4bit if latency allows (unlikely).
