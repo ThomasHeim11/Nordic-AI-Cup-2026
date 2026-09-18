@@ -103,7 +103,8 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
       Recorded validation scene measured: dy +68 px/frame ≈ Helsinki (+65).
 - [x] Report hygiene: class-agnostic NMS (IoU 0.6) + cap 80 per frame (neutral on Helsinki).
 - [x] `pseudo_label.py` + `cluster_train.sh round2 <weights>`: self-training on recorded views.
-- [ ] Per-class confidence thresholds from the recordings once the new detector exists; TTA.
+- [x] Flip TTA implemented (`DRONE_TTA=1`), OFF by default: 0.867 vs 0.903 on Helsinki with the current model.
+- [ ] Per-class confidence thresholds from the recordings once the new detector exists; re-test TTA with it.
 
 ### Challenge 3 — Medical  (pipeline works; quote-based evidence being evaluated)
 - [x] ASR: mlx-whisper large-v3-turbo via MLX, PyAV decoding (no ffmpeg). Excellent transcripts.
