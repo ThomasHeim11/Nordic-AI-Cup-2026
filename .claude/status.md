@@ -138,8 +138,11 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
       as the answer space; oracle 1–3 consecutive units = 0.81 tIoU. With the 7B: **0.685** (< 0.706) —
       accuracy 0.964, tIoU 0.499. Kept as an option for the 14B; not default.
 - [x] **Learned cross-encoder re-ranker** (`reranker.py`, MiniLM on 195 gold spans, 5-fold CV by
-      conversation): selection 36 % vs LLM 68 % — data-limited (folds 0.20–0.58). Variants
-      (epochs 6, context on/off, bge-reranker-base) running → `reranker_variants.log`.
+      conversation): 2 epochs + context 36 %; **6 epochs, no context: 68.7 % selection, tIoU 0.515** —
+      on par with the LLM, different errors → combine. Defaults now context off / 6 epochs.
+      Overnight: re-ranker trained on all 39 + three combined units+CE evaluations → `units_ce_eval.log`
+      (NOTE: that offline number is optimistic — the re-ranker saw the same conversations; the honest
+      estimate needs fold-wise models. Treat > 0.706 as promising, confirm on validation).
 - [ ] Tomorrow on the A40: 14B (and 32B-4bit if it installs) in quote mode AND units mode; pick best.
 - [ ] Ideas: per-question prompts with KV-cache reuse; larger embedder for candidates;
       ask for line + quote in the re-rank pass; Qwen2.5-14B-4bit if latency allows (unlikely).

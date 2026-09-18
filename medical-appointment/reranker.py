@@ -23,8 +23,8 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODEL_DIR = os.path.join(HERE, "models", "reranker")
 BASE = os.environ.get("RERANK_BASE", "cross-encoder/ms-marco-MiniLM-L-6-v2")
-CONTEXT = os.environ.get("RERANK_CONTEXT", "1") == "1"   # score "prev || UNIT || next" so one-word units are not orphaned
-EPOCHS = int(os.environ.get("RERANK_EPOCHS", "2"))
+CONTEXT = os.environ.get("RERANK_CONTEXT", "0") == "1"   # score "prev || UNIT || next" so one-word units are not orphaned
+EPOCHS = int(os.environ.get("RERANK_EPOCHS", "6"))
 
 
 def _device():
