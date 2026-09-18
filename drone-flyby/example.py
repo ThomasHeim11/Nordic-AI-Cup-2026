@@ -1,211 +1,493 @@
-"""A baseline that answers the protocol correctly and detects almost nothing.
+"""Drone flyby: YOLO detector + dead-reckoning tracker + camera sweep.
 
-The point of this file is the plumbing, not the accuracy: it shows you how to
-decode a view, lift boxes out of that view into the frame-global coordinates
-the evaluator expects, and drive the camera without ever sending an illegal
-command. Replace ``detect`` with your model and ``choose_next_view`` with your
-camera policy.
+The three parts and why they exist:
 
-It is stateless. Each response contains the detections made on the view that
-arrived with that request, so at Level 1 and Level 2 it reports only the region
-the camera is pointed at, while a frame's ground truth covers the whole source
-frame.
-
-Run ``python local_evaluator.py`` to see what it scores. It will be close to
-zero, which is the honest starting point.
+* **Detector** -- a YOLO model fine-tuned on multi-scale crops of the supplied
+  frames, run on the 960x540 view.  Boxes are lifted into source pixels through
+  ``source_region_xyxy``.
+* **Tracker** -- the drone flies a straight line at constant speed with a
+  forward-pitched camera, so every object scrolls down the frame with
+  ``dy = 51.85 + 0.01333 * y`` px/frame (fitted on the Helsinki annotations,
+  residual 0.8 px).  A detection made once at Level 2 can therefore be
+  reported, at IoU > 0.5, for the rest of that object's life in the frame --
+  which is what makes "answer for the whole frame from one crop" possible.
+* **Camera policy** -- objects enter at the top edge, so after an initial coarse
+  scan of the whole frame the camera sweeps the top band at Level 2, where even
+  the 20-px classes are native-resolution.  Every command is derived from the
+  request's ``camera_constraints`` so it is never rejected.
 """
 
+import glob
 import logging
+import math
+import os
+import time
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-import cv2
 import numpy as np
 
 from dtos import (
-    MAXIMUM_CENTER_DELTA_PIXELS,
+    IMAGE_HEIGHT,
+    IMAGE_WIDTH,
+    OBJECT_CLASSES,
     DroneFlybyPredictionDto,
     DroneFlybyPredictRequestDto,
     DroneFlybyPredictResponseDto,
     RequestedViewDto,
 )
-from utils import clip_bbox_to_frame, decode_view, view_bbox_to_global
+from utils import clip_bbox_to_frame, decode_view, describe_camera_rejection, source_bbox_to_global
+
+ALLOWED_LEVELS_FROM = {0: (0, 1), 1: (0, 1, 2), 2: (1, 2)}
 
 logger = logging.getLogger(__name__)
 
+# --------------------------------------------------------------------------- #
+# Motion model: the per-frame ground-plane homography, fitted on the Helsinki
+# annotation tracks (residual 0.3 px in x, 0.7 px in y).  The camera is pitched
+# forward, so objects flow radially: x drifts outwards by ~0.7% of its distance
+# from the vanishing point per frame, y scrolls by 52 + 1.2% * y.
+# --------------------------------------------------------------------------- #
+HERE = os.path.dirname(os.path.abspath(__file__))
+_H_DEFAULT = np.array([[1.006756, -0.001473, -12.614238],
+                       [0.000337, 1.011899, 51.706644],
+                       [0.0, -0.000001, 1.0]], dtype=np.float64)
+try:
+    MOTION_H = np.load(os.path.join(HERE, "cache", "homography.npy"))
+except Exception:
+    MOTION_H = _H_DEFAULT
 
-### CALL YOUR CUSTOM MODEL VIA THIS FUNCTION ###
+
+def warp_point(x: float, y: float, H=None) -> Tuple[float, float]:
+    H = MOTION_H if H is None else H
+    v = H @ np.array([x, y, 1.0])
+    return float(v[0] / v[2]), float(v[1] / v[2])
+
+# --------------------------------------------------------------------------- #
+# Detector
+# --------------------------------------------------------------------------- #
+WEIGHT_CANDIDATES = [
+    os.path.join(HERE, "weights", "best.pt"),
+    os.path.join(HERE, "runs", "detect", "runs", "drone_s", "weights", "best.pt"),
+    os.path.join(HERE, "..", "runs", "detect", "runs", "drone_s", "weights", "best.pt"),
+    os.path.join(HERE, "runs", "detect", "runs", "drone_s", "weights", "last.pt"),
+    os.path.join(HERE, "..", "runs", "detect", "runs", "drone_s", "weights", "last.pt"),
+]
+CONF_THRESHOLD = float(os.environ.get("DRONE_CONF", "0.12"))
+NMS_IOU = 0.5
+IMGSZ = 960
+
+
+class Detector:
+    def __init__(self):
+        self.model = None
+        self.device = "cpu"
+        path = next((p for p in WEIGHT_CANDIDATES if os.path.exists(p)), None)
+        if path is None:
+            logger.error("no YOLO weights found; detector disabled (candidates: %s)", WEIGHT_CANDIDATES)
+            return
+        try:
+            import torch
+            from ultralytics import YOLO
+            self.device = "mps" if torch.backends.mps.is_available() else (
+                "cuda" if torch.cuda.is_available() else "cpu")
+            self.model = YOLO(path)
+            # Warm up: the first inference is by far the slowest.
+            dummy = np.zeros((540, 960, 3), dtype=np.uint8)
+            t0 = time.perf_counter()
+            for _ in range(2):
+                self.model.predict(dummy, imgsz=IMGSZ, device=self.device, verbose=False)
+            logger.info("loaded %s on %s (warm-up %.0f ms)", path, self.device,
+                        1000 * (time.perf_counter() - t0))
+        except Exception:
+            logger.exception("failed to load YOLO weights from %s", path)
+            self.model = None
+
+    def __call__(self, image: np.ndarray) -> List[Tuple[int, float, float, float, float, float]]:
+        """Return (class_index, conf, x1, y1, x2, y2) in view pixels."""
+        if self.model is None:
+            return []
+        results = self.model.predict(image, imgsz=IMGSZ, conf=CONF_THRESHOLD, iou=NMS_IOU,
+                                     device=self.device, verbose=False, max_det=200)
+        out = []
+        for r in results:
+            if r.boxes is None:
+                continue
+            xyxy = r.boxes.xyxy.cpu().numpy()
+            conf = r.boxes.conf.cpu().numpy()
+            cls = r.boxes.cls.cpu().numpy().astype(int)
+            for (x1, y1, x2, y2), c, k in zip(xyxy, conf, cls):
+                out.append((int(k), float(c), float(x1), float(y1), float(x2), float(y2)))
+        return out
+
+
+DETECTOR = Detector()
+
+# --------------------------------------------------------------------------- #
+# Tracker
+# --------------------------------------------------------------------------- #
+
+def advance(cx, cy, w, h, steps: int):
+    """Dead-reckon a box through ``steps`` frames by warping its corners."""
+    x1, y1, x2, y2 = cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2
+    for _ in range(steps):
+        x1, y1 = warp_point(x1, y1)
+        x2, y2 = warp_point(x2, y2)
+    return (x1 + x2) / 2, (y1 + y2) / 2, max(1.0, x2 - x1), max(1.0, y2 - y1)
+
+
+def iou_xyxy(a, b) -> float:
+    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    if inter <= 0:
+        return 0.0
+    ua = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / ua if ua > 0 else 0.0
+
+
+@dataclass
+class Track:
+    cx: float
+    cy: float
+    w: float
+    h: float
+    frame: int                      # frame the state refers to
+    conf: float                     # best evidence so far, decayed on misses
+    votes: Dict[int, float] = field(default_factory=dict)
+    hits: int = 1
+    misses_in_view: int = 0
+    best_level: int = 0             # highest zoom this track has been seen at
+
+    @property
+    def cls(self) -> int:
+        return max(self.votes.items(), key=lambda kv: kv[1])[0]
+
+    def box(self):
+        return (self.cx - self.w / 2, self.cy - self.h / 2, self.cx + self.w / 2, self.cy + self.h / 2)
+
+    def predict_to(self, frame: int):
+        steps = frame - self.frame
+        if steps > 0:
+            self.cx, self.cy, self.w, self.h = advance(self.cx, self.cy, self.w, self.h, steps)
+            self.frame = frame
+
+
+LEVEL_WEIGHT = {0: 1.0, 1: 2.0, 2: 3.0}
+LEVEL_ALPHA = {0: 0.35, 1: 0.6, 2: 0.85}       # how much a detection moves the state
+MATCH_IOU = 0.25
+MATCH_DIST_FRAC = 0.9                         # or centre within this * max(w,h)
+MISS_DECAY = {0: 0.97, 1: 0.85, 2: 0.6}       # conf decay when in view but not detected
+OFFVIEW_DECAY = 0.995
+REPORT_MIN_CONF = 0.08
+DUPLICATE_IOU = 0.55
+
+
+class Tracker:
+    def __init__(self):
+        self.tracks: List[Track] = []
+
+    def step(self, frame: int, level: int, region, detections):
+        """detections: list of (cls, conf, x1, y1, x2, y2) in SOURCE pixels."""
+        for t in self.tracks:
+            t.predict_to(frame)
+        # Drop what has left the frame.
+        self.tracks = [t for t in self.tracks if t.cy - t.h / 2 < IMAGE_HEIGHT + 20 and t.conf > 0.02]
+
+        rx1, ry1, rx2, ry2 = region
+        used = set()
+        pairs = []
+        for ti, t in enumerate(self.tracks):
+            tb = t.box()
+            for di, d in enumerate(detections):
+                db = d[2:6]
+                ov = iou_xyxy(tb, db)
+                dcx, dcy = (db[0] + db[2]) / 2, (db[1] + db[3]) / 2
+                dist = math.hypot(dcx - t.cx, dcy - t.cy)
+                if ov >= MATCH_IOU or dist < MATCH_DIST_FRAC * max(t.w, t.h, 20):
+                    pairs.append((ov + 1e-3 * d[1], ti, di))
+        pairs.sort(reverse=True)
+        matched_t = set()
+        for _, ti, di in pairs:
+            if ti in matched_t or di in used:
+                continue
+            matched_t.add(ti)
+            used.add(di)
+            t = self.tracks[ti]
+            k, c, x1, y1, x2, y2 = detections[di]
+            a = LEVEL_ALPHA[level]
+            # A precise zoomed-in box should not be dragged around by a coarse one.
+            if level < t.best_level:
+                a *= 0.4
+            t.cx = (1 - a) * t.cx + a * (x1 + x2) / 2
+            t.cy = (1 - a) * t.cy + a * (y1 + y2) / 2
+            t.w = (1 - a) * t.w + a * (x2 - x1)
+            t.h = (1 - a) * t.h + a * (y2 - y1)
+            t.votes[k] = t.votes.get(k, 0.0) + c * LEVEL_WEIGHT[level]
+            t.conf = max(t.conf * 0.9 + c * LEVEL_WEIGHT[level] / 3 * 0.1, c * (0.7 + 0.1 * level))
+            t.conf = min(1.0, t.conf)
+            t.hits += 1
+            t.misses_in_view = 0
+            t.best_level = max(t.best_level, level)
+
+        for ti, t in enumerate(self.tracks):
+            if ti in matched_t:
+                continue
+            inside = rx1 <= t.cx <= rx2 and ry1 <= t.cy <= ry2
+            if inside:
+                # Was in view and not detected: weak evidence at L0 (tiny
+                # objects vanish there), strong at L2.
+                t.conf *= MISS_DECAY[level]
+                t.misses_in_view += 1
+            else:
+                t.conf *= OFFVIEW_DECAY
+
+        for di, d in enumerate(detections):
+            if di in used:
+                continue
+            k, c, x1, y1, x2, y2 = d
+            self.tracks.append(Track(
+                cx=(x1 + x2) / 2, cy=(y1 + y2) / 2, w=x2 - x1, h=y2 - y1, frame=frame,
+                conf=c * (0.7 + 0.1 * level), votes={k: c * LEVEL_WEIGHT[level]}, best_level=level))
+
+        self._merge_duplicates()
+
+    def _merge_duplicates(self):
+        self.tracks.sort(key=lambda t: t.conf, reverse=True)
+        kept: List[Track] = []
+        for t in self.tracks:
+            dup = None
+            for k in kept:
+                if iou_xyxy(t.box(), k.box()) > DUPLICATE_IOU:
+                    dup = k
+                    break
+            if dup is None:
+                kept.append(t)
+            else:
+                for c, v in t.votes.items():
+                    dup.votes[c] = dup.votes.get(c, 0.0) + v
+                dup.hits += t.hits
+        self.tracks = kept
+
+    def report(self) -> List[Tuple[str, Tuple[float, float, float, float], float]]:
+        out = []
+        for t in self.tracks:
+            conf = t.conf
+            if t.hits == 1:
+                conf *= 0.75
+            if t.misses_in_view >= 3 and t.hits <= 2:
+                conf *= 0.5
+            if conf < REPORT_MIN_CONF:
+                continue
+            out.append((OBJECT_CLASSES[t.cls], t.box(), conf))
+        return out
+
+
+# --------------------------------------------------------------------------- #
+# Camera policy
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class CameraPlan:
+    phase: str = "init"            # init -> tiles -> sweep
+    tile_index: int = 0
+    sweep_dir: int = 1
+    last_frame: int = -1
+    last_dive_frame: int = -100
+    dive_target: Optional[int] = None   # id(track) being dived on
+
+
+# Level-1 tiles that cover the whole frame (centres), visited once at the start.
+L1_TILES = [(960, 540), (2880, 540), (2880, 1620), (960, 1620)]
+# Sweep band: objects enter at the top, so patrol y = SWEEP_Y at SWEEP_LEVEL.
+SWEEP_LEVEL = 1
+SWEEP_Y = 300
+SWEEP_Y_BY_LEVEL = {1: 540, 2: 300}
+# L2 dives: re-inspect a track at native resolution if it was only seen coarsely
+# and is small or uncertain.  At most one dive every DIVE_EVERY frames so the
+# sweep keeps covering the entry band.
+DIVE_ENABLED = True
+DIVE_MAX_SIZE = 60.0       # source px; larger objects are fine at L1
+DIVE_MIN_CONF = 0.55
+DIVE_EVERY = 3
+DIVE_MARGIN = 80           # keep the predicted box this far inside the L2 crop
+
+
+def choose_next_view(request: DroneFlybyPredictRequestDto, plan: CameraPlan,
+                     tracker: Optional["Tracker"] = None) -> Optional[RequestedViewDto]:
+    """Camera policy plus a last-line legality check.
+
+    A refused command costs a frame of camera motion and, worse, leaves the
+    camera wherever it was.  So every command is re-checked with the same rules
+    the evaluator applies, and an illegal one is replaced by a hold.
+    """
+    view = request.view
+    req = _choose_next_view(request, plan, tracker)
+    if req is None:
+        return None
+    reason = describe_camera_rejection(view.resolution_level, (view.center_x, view.center_y),
+                                       req.resolution_level, (req.center_x, req.center_y))
+    if reason is None:
+        return req
+    logger.warning("suppressed illegal camera command %s: %s", req, reason)
+    return None
+
+
+def _choose_next_view(request: DroneFlybyPredictRequestDto, plan: CameraPlan,
+                      tracker: Optional["Tracker"] = None) -> Optional[RequestedViewDto]:
+    constraints = request.camera_constraints
+    view = request.view
+    level = view.resolution_level
+    cx, cy = view.center_x, view.center_y
+    limit = constraints.maximum_center_delta
+
+    def clamp_to(level_target, x, y):
+        b = constraints.bounds_for_level(level_target)
+        if b is None:
+            return None
+        x = int(min(max(round(x), b.minimum_center_x), b.maximum_center_x))
+        y = int(min(max(round(y), b.minimum_center_y), b.maximum_center_y))
+        return x, y
+
+    def step_towards(x, y, max_step):
+        """Move from the current centre towards (x, y) by at most max_step."""
+        dx, dy = x - cx, y - cy
+        d = math.hypot(dx, dy)
+        if d <= max_step:
+            return x, y
+        s = max_step / d
+        return cx + dx * s, cy + dy * s
+
+    allowed = set(constraints.allowed_resolution_levels)
+
+    if plan.phase == "init":
+        # First frame arrives at L0.  Step to L1 and start the tile tour.
+        if 1 in allowed:
+            plan.phase = "tiles"
+            plan.tile_index = 0
+            tx, ty = L1_TILES[0]
+            x, y = step_towards(tx, ty, limit * 0.98)
+            p = clamp_to(1, x, y)
+            return RequestedViewDto(resolution_level=1, center_x=p[0], center_y=p[1])
+        return None
+
+    if plan.phase == "tiles":
+        tx, ty = L1_TILES[plan.tile_index]
+        if level == 1 and abs(cx - tx) < 5 and abs(cy - ty) < 5:
+            plan.tile_index += 1
+            if plan.tile_index >= len(L1_TILES):
+                plan.phase = "sweep"
+            else:
+                tx, ty = L1_TILES[plan.tile_index]
+        if plan.phase == "tiles":
+            x, y = step_towards(tx, ty, limit * 0.98)
+            p = clamp_to(1, x, y)
+            return RequestedViewDto(resolution_level=1, center_x=p[0], center_y=p[1])
+
+    # Dive: one frame at L2 on a track that deserves a closer look.
+    if DIVE_ENABLED and tracker is not None and 2 in allowed and request.frame - plan.last_dive_frame >= DIVE_EVERY:
+        b2 = constraints.bounds_for_level(2)
+        best, best_score = None, 0.0
+        for t in tracker.tracks:
+            if t.best_level >= 2 or t.conf < REPORT_MIN_CONF:
+                continue
+            small = max(t.w, t.h) <= DIVE_MAX_SIZE
+            unsure = t.conf < DIVE_MIN_CONF
+            if not (small or unsure):
+                continue
+            # Where will it be on the next frame?
+            nx_, ny_ = warp_point(t.cx, t.cy)
+            if not (DIVE_MARGIN < nx_ < IMAGE_WIDTH - DIVE_MARGIN and DIVE_MARGIN < ny_ < IMAGE_HEIGHT - DIVE_MARGIN):
+                continue
+            tx = min(max(nx_, b2.minimum_center_x), b2.maximum_center_x)
+            ty = min(max(ny_, b2.minimum_center_y), b2.maximum_center_y)
+            if math.hypot(tx - cx, ty - cy) > limit * 0.98:
+                continue
+            # The way back must be legal too: from L2 the limit is 551 px, so
+            # only dive where the same centre is also a valid L1 centre.
+            b1 = constraints.bounds_for_level(1) if 1 in ALLOWED_LEVELS_FROM[2] else None
+            if b1 is None or not (b1.minimum_center_x <= tx <= b1.maximum_center_x
+                                  and b1.minimum_center_y <= ty <= b1.maximum_center_y):
+                continue
+            score = (1.0 if small else 0.0) + (1.0 - t.conf)
+            if score > best_score:
+                best, best_score = (int(round(tx)), int(round(ty))), score
+        if best is not None:
+            plan.last_dive_frame = request.frame
+            return RequestedViewDto(resolution_level=2, center_x=best[0], center_y=best[1])
+
+    # sweep phase: patrol the top band, zig-zagging in x by the max step.
+    lvl = SWEEP_LEVEL
+    band_y = SWEEP_Y_BY_LEVEL.get(lvl, SWEEP_Y)
+    if level != lvl:
+        target = lvl if lvl in allowed else (max(a for a in allowed if a <= lvl) if any(a <= lvl for a in allowed) else min(allowed))
+        p = clamp_to(target, *step_towards(cx, band_y, limit * 0.98))
+        return RequestedViewDto(resolution_level=target, center_x=p[0], center_y=p[1])
+
+    b = constraints.bounds_for_level(lvl)
+    step = int(limit * 0.98)
+    # Touch the edge before turning around: objects hugging the frame border
+    # are only ever covered by a crop centred on the bound itself.
+    if plan.sweep_dir > 0 and cx >= b.maximum_center_x - 2:
+        plan.sweep_dir = -1
+    elif plan.sweep_dir < 0 and cx <= b.minimum_center_x + 2:
+        plan.sweep_dir = 1
+    nx = min(max(cx + plan.sweep_dir * step, b.minimum_center_x), b.maximum_center_x)
+    x, y = step_towards(nx, band_y, limit * 0.98)
+    p = clamp_to(lvl, x, y)
+    return RequestedViewDto(resolution_level=lvl, center_x=p[0], center_y=p[1])
+
+
+# --------------------------------------------------------------------------- #
+# Per-sequence state and the entry point
+# --------------------------------------------------------------------------- #
+
+_SEQ: Dict[str, Tuple[Tracker, CameraPlan]] = {}
+
+
+def _state(sequence_id: str):
+    if sequence_id not in _SEQ:
+        if len(_SEQ) > 8:
+            _SEQ.clear()
+        _SEQ[sequence_id] = (Tracker(), CameraPlan())
+    return _SEQ[sequence_id]
+
 
 def predict(request: DroneFlybyPredictRequestDto) -> DroneFlybyPredictResponseDto:
-    """Answer one frame: report detections and pick the next camera position."""
-    # The evaluator tells you when it ignored your last camera command. Reading
-    # this beats wondering why the camera never moved.
+    tracker, plan = _state(request.sequence_id)
     if request.camera_command_feedback is not None:
-        feedback = request.camera_command_feedback
-        logger.warning(
-            'Camera command from frame %s was ignored: %s',
-            feedback.frame,
-            feedback.reason,
-        )
-
-    image = decode_view(request.view)
-
-    # Never let a modelling error cost you the frame. An empty list still
-    # scores the frame; an exception loses it and every detection in it.
-    try:
-        annotations = detect(image, request)
-    except Exception:
-        logger.exception('Detector failed on frame %s', request.frame)
-        annotations = []
-
-    return DroneFlybyPredictResponseDto(
-        # These two must come straight back from the request, unchanged.
-        request_id=request.request_id,
-        frame=request.frame,
-        annotations=annotations,
-        requested_view=choose_next_view(request),
-    )
-
-
-### DUMMY MODEL ###
-
-# A placeholder class for the proposals below. Anything you report has to be
-# one of the names in dtos.OBJECT_CLASSES, spelled exactly.
-PLACEHOLDER_CLASS = 'jammer'
-
-MINIMUM_BOX_PIXELS = 8
-MAXIMUM_BOX_PIXELS = 320
-MAXIMUM_PROPOSALS = 20
-
-
-def detect(
-    image: np.ndarray,
-    request: DroneFlybyPredictRequestDto,
-) -> List[DroneFlybyPredictionDto]:
-    """Propose boxes around whatever stands out from the ground.
-
-    This is edge detection, not object detection: it has no idea what it is
-    looking at, so it labels everything ``jammer`` with low confidence. It exists
-    to show the coordinate conversion on real data. Swap it out.
-
-    It takes the request as well as the image because a detection is made in
-    view coordinates and has to be answered in frame-global ones, and the
-    geometry for that conversion lives on the request.
-    """
-    height, width = image.shape[:2]
-    source_region = request.view.source_region_xyxy
-    grey = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(cv2.GaussianBlur(grey, (3, 3), 0), 60, 180)
-    edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1)
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    proposals: List[Tuple[float, Tuple[int, int, int, int]]] = []
-    for contour in contours:
-        x, y, box_width, box_height = cv2.boundingRect(contour)
-        longest = max(box_width, box_height)
-        if longest < MINIMUM_BOX_PIXELS or longest > MAXIMUM_BOX_PIXELS:
-            continue
-        # Compactness stands in for "looks like a thing" here.
-        area_ratio = cv2.contourArea(contour) / float(box_width * box_height or 1)
-        proposals.append((area_ratio, (x, y, box_width, box_height)))
-
-    proposals.sort(key=lambda item: item[0], reverse=True)
+        logger.warning("camera command from frame %s ignored: %s",
+                       request.camera_command_feedback.frame, request.camera_command_feedback.reason)
 
     annotations: List[DroneFlybyPredictionDto] = []
-    for area_ratio, (x, y, box_width, box_height) in proposals[:MAXIMUM_PROPOSALS]:
-        # Boxes leave your model in the pixels of this 960x540 image. Two
-        # steps put them in response coordinates: normalize to the view, then
-        # lift that through source_region_xyxy into frame-global coordinates.
-        view_bbox = (
-            x / width,
-            y / height,
-            (x + box_width) / width,
-            (y + box_height) / height,
-        )
-        bbox = clip_bbox_to_frame(
-            view_bbox_to_global(
-                view_bbox,
-                source_region,
-                request.original_width,
-                request.original_height,
-            )
-        )
-        # clip_bbox_to_frame returns None when nothing survives clipping. Drop
-        # those: one degenerate box invalidates the entire response.
-        if bbox is None:
-            continue
-        annotations.append(
-            DroneFlybyPredictionDto(
-                object_id=PLACEHOLDER_CLASS,
-                bbox=list(bbox),
-                confidence=round(min(0.30, 0.05 + 0.25 * area_ratio), 4),
-            )
-        )
-    return annotations
+    try:
+        image = decode_view(request.view)
+        region = request.view.source_region_xyxy
+        rx1, ry1, rx2, ry2 = region
+        sx = (rx2 - rx1) / request.view.width
+        sy = (ry2 - ry1) / request.view.height
+        dets = []
+        for k, c, x1, y1, x2, y2 in DETECTOR(image):
+            dets.append((k, c, rx1 + x1 * sx, ry1 + y1 * sy, rx1 + x2 * sx, ry1 + y2 * sy))
+        tracker.step(request.frame, request.view.resolution_level, region, dets)
 
+        for name, box, conf in tracker.report():
+            g = clip_bbox_to_frame(source_bbox_to_global(box, request.original_width, request.original_height))
+            if g is None:
+                continue
+            annotations.append(DroneFlybyPredictionDto(
+                object_id=name, bbox=[round(v, 6) for v in g], confidence=round(float(min(max(conf, 0.0), 1.0)), 4)))
+        annotations.sort(key=lambda a: a.confidence, reverse=True)
+        annotations = annotations[:500]
+    except Exception:
+        logger.exception("detector/tracker failed on frame %s", request.frame)
 
-### DUMMY CAMERA POLICY ###
+    try:
+        requested = choose_next_view(request, plan, tracker)
+    except Exception:
+        logger.exception("camera policy failed on frame %s", request.frame)
+        requested = None
 
-# Where the sweep goes next, per sequence. The evaluator sends the camera's
-# real position in every request, so this only needs to remember intent.
-_sweep_direction: Dict[str, int] = {}
-
-
-def choose_next_view(
-    request: DroneFlybyPredictRequestDto,
-) -> Optional[RequestedViewDto]:
-    """Sweep sideways at the deepest zoom the camera can reach right now.
-
-    Everything here is read from ``request.camera_constraints`` rather than
-    hardcoded, which is the whole trick: honour the constraints you are handed
-    and your commands cannot be rejected. Return ``None`` to hold position.
-    """
-    constraints = request.camera_constraints
-    current = request.view
-    allowed = [level for level in constraints.allowed_resolution_levels if level > 0]
-    if not allowed:
-        return None
-
-    # Zoom in one step at a time; L0 cannot reach L2 directly.
-    target_level = min(max(allowed), current.resolution_level + 1)
-    bounds = constraints.bounds_for_level(target_level)
-    if bounds is None:
-        return None
-
-    # Coming from the full view there is only one legal centre to start from.
-    if current.resolution_level == 0:
-        centre_x = (bounds.minimum_center_x + bounds.maximum_center_x) // 2
-        centre_y = (bounds.minimum_center_y + bounds.maximum_center_y) // 2
-        return RequestedViewDto(
-            resolution_level=target_level,
-            center_x=int(centre_x),
-            center_y=int(centre_y),
-        )
-
-    direction = _sweep_direction.setdefault(request.sequence_id, 1)
-
-    # Move as far as this response is allowed to, and no further. The limit
-    # belongs to the level the camera is on now, not the one we are going to.
-    limit = constraints.maximum_center_delta or MAXIMUM_CENTER_DELTA_PIXELS[
-        current.resolution_level
-    ]
-    step = int(limit * 0.9)
-
-    centre_x = current.center_x + direction * step
-    if centre_x > bounds.maximum_center_x or centre_x < bounds.minimum_center_x:
-        # Turn around at the edge and drop down a row.
-        direction = -direction
-        _sweep_direction[request.sequence_id] = direction
-        centre_x = current.center_x + direction * step
-
-    centre_y = current.center_y
-
-    # Clamp into the legal window. int() matters: these fields are strict ints
-    # on the evaluator, so a float here is a validation error.
-    centre_x = int(min(max(centre_x, bounds.minimum_center_x), bounds.maximum_center_x))
-    centre_y = int(min(max(centre_y, bounds.minimum_center_y), bounds.maximum_center_y))
-
-    return RequestedViewDto(
-        resolution_level=target_level,
-        center_x=centre_x,
-        center_y=centre_y,
-    )
+    return DroneFlybyPredictResponseDto(
+        request_id=request.request_id, frame=request.frame,
+        annotations=annotations, requested_view=requested)

@@ -1,0 +1,38 @@
+{
+  "score": 1165.1027550352678,
+  "gen": 7,
+  "seeds": [
+    680028,
+    339814,
+    108240,
+    737921
+  ],
+  "params": {
+    "danger_dist": 105.0,
+    "aware_dist": 289.4099131551896,
+    "retreat_speed_frac": 1.0,
+    "fruit_seek": 285.5183891261815,
+    "fruit_full_frac": 0.9140060532437531,
+    "tree_seek": 400.0,
+    "tree_camp": 47.31977933294399,
+    "scan_turn": 0.13335906557585356,
+    "crowd_radius": 93.6095579643148,
+    "crowd_limit": 3.0,
+    "separation": 71.85323470390253,
+    "separation_gain": 0.5929914646750708,
+    "wall_margin": 34.53884934367616,
+    "move_deadzone": 0.41084454097365386,
+    "wander_jitter": 0.05,
+    "turn_gain": 0.7856723239800916,
+    "max_turn": 0.7140191100919417,
+    "spawn_energy": 204.8145948253731,
+    "spawn_energy_low": 149.5119653745417,
+    "spawn_min_pop": 4.0,
+    "spawn_max_pop": 24.0,
+    "spawn_elite_frac": 0.5390851337112339,
+    "spawn_predator_clear": 257.9906792843251,
+    "elder_age": 85.97398218984212,
+    "elder_spawn_energy": 116.73469166103362,
+    "elder_pop_slack": 1.0174837085944812
+  }
+}
