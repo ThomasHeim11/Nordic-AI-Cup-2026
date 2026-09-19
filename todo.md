@@ -59,11 +59,14 @@ The branch servers are what is running on :9053/:9054 after `restart_from_branch
       1. **Plug the Mac into the router by Ethernet** (100 Mbit LAN ports → ~2× the throughput, expected ~250 ms/frame). Then re-run
          the Stockholm test: `ssh -i ~/Downloads/nordic.pem ubuntu@16.170.155.200` →
          `cd ~/Nordic-AI-Cup-2026/drone-flyby && sudo docker run --rm --network host -v "$PWD":/w -w /w python:3.11-slim bash -c "pip install -q numpy opencv-python-headless requests pydantic 'faster-coco-eval>=1.7.2,<2'; python local_evaluator.py --realtime --url http://178.232.205.38:9053/predict"`
-      2. **AWS CPU box for the drone** (robust, no home link): launch in eu-north-1 an Ubuntu **c7i.2xlarge** (8 vCPU; c7i.4xlarge if
-         the quota allows 16), 30 GB disk, same key pair, security group TCP 22 + 9053. Then on it:
-         `git clone https://github.com/ThomasHeim11/Nordic-AI-Cup-2026.git && cd Nordic-AI-Cup-2026 && git checkout worktree-survival-fast-server && cd drone-flyby && sudo docker build -f Dockerfile.cpu -t drone-cpu . && sudo docker run -d --restart unless-stopped --network host --name drone drone-cpu`
-         (the ONNX weights are in the branch). Measured: ONNX 544×960 fp32 = 305 ms on the t3.micro's 2 old cores → expect
-         50–80 ms on a c7i.2xlarge, 25–40 ms on a 4xlarge; network Helsinki↔Stockholm ~30 ms. Free-plan credits, ~$9/day.
+      2. **AWS CPU box for the drone** (robust, no home link). The Free Plan refuses c7i.xlarge and up ("upgrade your plan"), so the
+         box is a **c7i-flex.large** (2 vCPU Sapphire Rapids, 4 GB) in eu-north-1, Ubuntu, key `nordic`, security group TCP 22 + 9053.
+         Deploy in one line on the box (installs docker, clones the branch, builds `Dockerfile.cpu`, starts it, prints the URL):
+         `curl -fsSL https://raw.githubusercontent.com/ThomasHeim11/Nordic-AI-Cup-2026/worktree-survival-fast-server/drone-flyby/deploy_aws_cpu.sh | bash -s -- models/mix2_final_best.onnx`
+         Backends in `models/` (all 544×960): ONNX fp32 Helsinki **0.936**, 305 ms on the t3.micro's 2 old cores; OpenVINO fp32 0.915,
+         276 ms; **OpenVINO int8 0.902, 202 ms** (Sapphire Rapids has AMX → int8 should be much faster there).
+         Pick on the real box with the Stockholm realtime test: ONNX if 25/25 frames, else int8
+         (`... | bash -s -- models/mix2_final_best_int8_openvino_model`). A skipped frame costs far more than 3 mAP points.
 - [ ] Whichever host passes 25/25 frames at < 250 ms in the Stockholm test → **validate** → read the new recording.
 - [ ] If still weak: another synth round with the new recording's objects (`mine_recordings.py` → `make_synth.py --mined`), overnight.
 
