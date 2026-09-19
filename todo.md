@@ -47,17 +47,20 @@ The branch servers are what is running on :9053/:9054 after `restart_from_branch
 - [ ] Sunday evening: terminate EC2.
 
 ## 2 · Drone — from 0.005 to > 0.83
-- [ ] `after_train.sh` (running) waits for training, scores best/last/epoch-4 on the recorded validation frames + Helsinki,
-      installs the winner as `weights/best.pt`, starts :9053 and :9054, adds the UPnP forwards. Log: `$CLAUDE_JOB_DIR/tmp/after_train.log`.
-- [ ] Then `eval_recorded.py --weights <winner>` → set `DRONE_CLASS_CONF` (rare classes low, ta-ta high) and `DRONE_CONF`
-      (AP is rank-based: low thresholds cost nothing unless the 80-box cap or junk tracks bite) → `eval_inprocess.py` on Helsinki → restart :9053.
-- [ ] `local_evaluator.py --realtime` against `http://178.232.205.38:9053` (25/25 frames, < 250 ms) → **validate** → read the new recording.
+- [x] Training done 16:00. Final epoch-20 checkpoint installed as `weights/best.pt`: Helsinki mAP 0.936 (old 0.903), recall
+      0.93 on the verified validation objects, 107 real boxes / 1 ta-ta on the 183 recorded frames (epoch 4: 83 / 4).
+- [x] Drone server :9053 restarted from the branch with it (`.claude/worktrees/survival-fast-server/drone-flyby/api_9053.log`).
+- [ ] `drone_exp.log` (job tmp dir): conf 0.12 vs 0.05, flip TTA, ta-ta 0.5 on Helsinki → if one wins, set the env var
+      (`DRONE_CONF`, `DRONE_TTA=1`, `DRONE_CLASS_CONF='{"ta-ta":0.5}'`) and restart :9053.
+- [ ] `local_evaluator.py --realtime --url http://178.232.205.38:9053/...` (25/25 frames, < 250 ms) → **validate** → read the new recording.
 - [ ] If still weak: another synth round with the new recording's objects (`mine_recordings.py` → `make_synth.py --mined`), overnight.
 
 ## 3 · Medical — from 0.698 to ≥ 0.85
 - [x] Boundaries: snap tolerances, pad, quote_pair, quote_seg all ≤ baseline. Closed.
 - [x] Selection: LLM + cross-encoder ensemble → 0.724 offline (branch).
-- [ ] Validate the branch server on `http://178.232.205.38:9054/predict` (expect ≈ 0.72; round trips must stay < 45 s).
+- [x] Branch server live on :9054; checked over HTTP (public + loopback, 19–32 s per conversation; spans match the offline
+      ensemble numbers exactly).
+- [ ] **Validate** on `http://178.232.205.38:9054/predict` (expect ≈ 0.72).
 - [ ] Next selection ideas (each: `qa_eval.py` on 39 convs, keep only if > 0.724): per-question prompts with KV-cache reuse;
       ask for line + quote in the re-rank pass with the cross-encoder's top-3 as extra candidates; tune `ce_margin`/`ce_top` (0.55–0.556 plateau, don't overfit).
 

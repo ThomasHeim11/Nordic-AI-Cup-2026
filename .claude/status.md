@@ -216,6 +216,16 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
   best/last/epoch-4 on the recordings + Helsinki, installs the winner, starts :9053/:9054 from main, UPnP) → `restart_from_branch.sh`
   (restarts both servers from the branch worktree) → `drone_exp.sh` (eval_recorded + Helsinki with conf 0.12/0.05, flip TTA,
   ta-ta 0.5) → `evolve_after.sh` (niced local evolver, 80 gens × 12 × 6 seeds, genome → `survival-simulator/evo_mac_a.json` in the worktree).
+- **16:00 drone mix2_s finished (20 epochs, val mAP50 0.8246).** The watcher's checkpoint loop was broken (macOS bash has no
+  `declare -A`, all "candidates" were the epoch-4 file) → scored by hand. **Final epoch-20 checkpoint wins**: on the 183
+  recorded validation frames @0.3 it reports 107 real-class boxes (jet 33, large_tower 20, small_plane 16, small_tower 14,
+  hangar 12, jammer 5, tank 3, heli 2) vs 83 for epoch 4, ta-ta FPs 1 vs 4; recall on the 59 verified objects 0.93 @0.3
+  (jammer found at every threshold, tank 2/3); **Helsinki in-process mAP 0.936** (old model 0.903, epoch 4 0.856).
+  Installed as `weights/best.pt` (copies: `weights/mix2_final_best.pt`, epoch 4 = `weights/mix2_ep.pt`, old = `weights/pre_mix2_best.pt`).
+- **Servers now run from the branch worktree** (`.claude/worktrees/survival-fast-server/{drone-flyby,medical-appointment}`,
+  logs `api_9053.log` / `api_9054.log` there): drone :9053 with the final weights, medical :9054 with the cross-encoder
+  ensemble. UPnP forwards 9052/9053/9054 are in place. Medical checked over HTTP: sample_4/5/6 through the public address
+  and loopback answer in 19–32 s; their spans average tIoU 0.635 = the offline number with the ensemble on (0.550 off) → live.
 - Drone: `eval_recorded.py` scores a checkpoint on the 59 human-verified validation objects (38 frames of recording
   6262…; those frames were synth backgrounds → optimistic). Epoch-4 mix2 checkpoint: recall 0.95 @conf 0.1, ta-ta 0 FPs.
   `DRONE_CLASS_CONF` env adds per-class confidence thresholds.
