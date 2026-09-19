@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # One-shot deploy of the CPU drone endpoint on a fresh Ubuntu EC2 box (run ON the box, as ubuntu).
 #   ssh -i ~/Downloads/nordic.pem ubuntu@<ip> 'curl -fsSL https://raw.githubusercontent.com/ThomasHeim11/Nordic-AI-Cup-2026/worktree-survival-fast-server/drone-flyby/deploy_aws_cpu.sh | bash -s -- [weights]'
-# weights (optional): models/mix2_final_best.onnx (default) | models/mix2_final_best_int8_openvino_model | models/mix2_final_best_openvino_model
+# weights (optional): models/mix2_final_best_openvino_model (default, 124 ms/0.936 on c7i-flex.large) | models/mix2_final_best_int8_openvino_model | models/mix2_final_best.onnx
 set -euo pipefail
-WEIGHTS=${1:-models/mix2_final_best.onnx}
+WEIGHTS=${1:-models/mix2_final_best_openvino_model}
 BRANCH=worktree-survival-fast-server
 if ! command -v docker >/dev/null; then
   sudo apt-get update -qq && sudo apt-get install -y -qq docker.io git >/dev/null

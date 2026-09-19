@@ -20,8 +20,12 @@ COPY dtos.py utils.py example.py api.py ./
 # models/ is tracked in git (weights/ and cache/ are not): the ONNX export + the fitted homography.
 COPY models/ models/
 
-# Pick the backend at run time:  -e DRONE_WEIGHTS=models/mix2_final_best_int8_openvino_model/mix2_final_best.xml
-ENV DRONE_WEIGHTS=models/mix2_final_best.onnx
+# Backends measured on a c7i-flex.large (Sapphire Rapids, AMX) from Stockholm, round trip incl. network:
+#   OpenVINO fp32 dir  124 ms mean / 154 max, Helsinki mAP 0.936   <- default
+#   OpenVINO int8 dir  139 / 166, 0.866-0.902
+#   ONNX fp32          261 / 302, 0.936
+# Override at run time with -e DRONE_WEIGHTS=...
+ENV DRONE_WEIGHTS=models/mix2_final_best_openvino_model
 ENV OMP_NUM_THREADS=8
 EXPOSE 9053
 

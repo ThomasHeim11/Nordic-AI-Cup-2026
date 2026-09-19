@@ -67,7 +67,13 @@ The branch servers are what is running on :9053/:9054 after `restart_from_branch
          276 ms; **OpenVINO int8 0.902, 202 ms** (Sapphire Rapids has AMX → int8 should be much faster there).
          Pick on the real box with the Stockholm realtime test: ONNX if 25/25 frames, else int8
          (`... | bash -s -- models/mix2_final_best_int8_openvino_model`). A skipped frame costs far more than 3 mAP points.
-- [ ] Whichever host passes 25/25 frames at < 250 ms in the Stockholm test → **validate** → read the new recording.
+- [x] **Drone box live: `http://16.192.171.219:9053`** (c7i-flex.large, Ubuntu, container `drone`, OpenVINO fp32 backend).
+      From Stockholm: round trip 124 ms mean / 154 max, offline mAP 0.936 (int8: 139 ms, 0.87–0.90; ONNX: 261 ms, 0.936).
+      The realtime test from the t3.micro still shows skips because that client needs > 1 s to encode each frame; irrelevant.
+      Redeploy after a code/model change: `ssh -i ~/Downloads/nordic.pem ubuntu@16.192.171.219 'cd ~/Nordic-AI-Cup-2026/drone-flyby && git pull -q && bash deploy_aws_cpu.sh'`.
+      Recordings of validation views land in `~/drone_recordings` on the box.
+- [ ] **Validate** drone on `http://16.192.171.219:9053` → read the new recording (`scp -r` it home) → per-class thresholds if needed.
+- [ ] Sunday evening: terminate both EC2 instances (survival + drone).
 - [ ] If still weak: another synth round with the new recording's objects (`mine_recordings.py` → `make_synth.py --mined`), overnight.
 
 ## 3 · Medical — from 0.698 to ≥ 0.85

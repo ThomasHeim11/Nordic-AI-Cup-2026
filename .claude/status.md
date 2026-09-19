@@ -9,12 +9,12 @@
   the drone: `cd ~/medical-appointment && nohup bash cluster_medical.sh eval > ~/medical_eval.log 2>&1 &`.
 - Cluster allocation (job 1412535, n009) ends ~19:00 Sat.
 
-## Scoreboard (official validation, 18 Sep evening)
-| challenge | score | limiting factor |
-|---|---|---|
-| survival | 619 s | per-tick latency (600 s accumulated-wait cap hit at tick 6190), not the policy |
-| drone | 0.005 | detector does not generalize to the validation terrain; + 28% frames skipped (latency) + stale-view camera bug (fixed) |
-| medical | 0.698 | matches offline 0.700 |
+## Scoreboard (official validation)
+| challenge | score | build | limiting factor |
+|---|---|---|---|
+| survival | 1177 (19 Sep 13:06) | gen19 genome, AWS t3.micro | policy endgame + ~3 network round trips per tick from Helsinki |
+| drone | 0.005 (18 Sep) | old detector, cloudflared | detector fixed since (Helsinki 0.936); hosting: home Wi-Fi cannot take 1.4 MB/333 ms → moving to AWS c7i-flex.large |
+| medical | **0.708 (19 Sep 19:15)**, was 0.698 | quote + re-rank + snap + cross-encoder ensemble, Mac 7B | passage selection (62/195 miss) |
 
 Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 points.
 - survival: 1st 1794 · 3rd 1712 · 5th 1634 · 10th 1312. Scores cluster at 1300–1500 and 1600–1800,
