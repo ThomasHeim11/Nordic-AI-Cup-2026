@@ -181,3 +181,4 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
   on 183 recorded validation frames @conf0.3: jet 22, small_plane 20, hangar 14, small_tower 13, large_tower 7, tank 5, heli 2, ta-ta 4
   (old 0.903 model: ta-ta 244 FPs, ~0 real objects). Helsinki pipeline 0.856 (old 0.903). Final pick after epoch 20 (~15:30).
 - Sat 12:58: AWS Stockholm survival endpoint http://16.170.155.200:9052 live (see deploy.md); validation queued (pos 6).
+- Sat 13:06: survival via AWS Stockholm validated **1177, no errors** (natural end, ~40 ms/tick). Latency solved; score now = policy. Next: continue evolution on cluster ARM nodes (slurm/survival_evolve_arm.sbatch), bench on 24 maps, deploy best to AWS via git pull.
