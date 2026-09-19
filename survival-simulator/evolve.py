@@ -28,6 +28,7 @@ BOUNDS = {
     "scan_turn":           (0.0, 0.5),
     "crowd_radius":        (30.0, 150.0),
     "crowd_limit":         (1.0, 8.0),
+    "crowd_limit_late":    (1.0, 8.0),
     "separation":          (10.0, 120.0),
     "separation_gain":     (0.0, 2.0),
     "wall_margin":         (15.0, 80.0),
@@ -54,7 +55,7 @@ BOUNDS = {
     "late_t0":             (200.0, 900.0),
     "late_t1":             (600.0, 2000.0),
 }
-INT_KEYS = {"crowd_limit", "spawn_min_pop", "spawn_max_pop"}
+INT_KEYS = {"crowd_limit", "crowd_limit_late", "spawn_min_pop", "spawn_max_pop"}
 
 
 def _worker(args):
@@ -100,6 +101,7 @@ def evaluate(pool, genomes, seeds):
 
 
 def main():
+    global OUT
     ap = argparse.ArgumentParser()
     ap.add_argument("--gens", type=int, default=8)
     ap.add_argument("--pop", type=int, default=12)
@@ -110,7 +112,6 @@ def main():
     ap.add_argument("--rng-seed", type=int, default=42)
     ap.add_argument("--out", default=OUT, help="where the best-so-far genome is written (default: the live params file)")
     a = ap.parse_args()
-    global OUT
     OUT = a.out
 
     from src.utils.controllers import hivemind_policy as hp

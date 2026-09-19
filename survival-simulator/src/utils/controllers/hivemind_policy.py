@@ -70,6 +70,8 @@ PARAMS: Dict[str, float] = {
     "scan_turn": 0.22,           # idle scan rate (rad/tick); buys predator warning
     "crowd_radius": 70.0,        # too many neighbours here -> go find another tree
     "crowd_limit": 3,
+    "crowd_limit_late": 5,       # crowd limit once the food has collapsed (ramps like late_pop);
+                                 # a tree yields ~0.1 fruit/s, so late on every tree should feed few
     # --- flocking / exploration ---
     "separation": 55.0,
     "separation_gain": 0.9,
@@ -151,6 +153,18 @@ def population_target(t: float, p: Dict[str, float]) -> float:
     late_t0 down to late_pop at late_t1.
     """
     hi, lo = p["spawn_max_pop"], p["late_pop"]
+    t0, t1 = p["late_t0"], max(p["late_t1"], p["late_t0"] + 1.0)
+    if t <= t0:
+        return hi
+    if t >= t1:
+        return lo
+    return hi + (lo - hi) * (t - t0) / (t1 - t0)
+
+
+def _late_ramp(p: Dict[str, float], early_key: str, late_key: str) -> float:
+    """A parameter that moves from its early to its late value on the late_t0..late_t1 ramp."""
+    hi, lo = p[early_key], p[late_key]
+    t = _CLOCK["t"]
     t0, t1 = p["late_t0"], max(p["late_t1"], p["late_t0"] + 1.0)
     if t <= t0:
         return hi
@@ -489,7 +503,7 @@ def decide(state: dict, may_spawn: bool, rng: random.Random, spawn_energy: float
                 target = f["angle"]
                 tx, ty = math.cos(target) * 2.0, math.sin(target) * 2.0
 
-        crowded = sum(1 for m in mates if m["distance"] < p["crowd_radius"]) >= p["crowd_limit"]
+        crowded = sum(1 for m in mates if m["distance"] < p["crowd_radius"]) >= _late_ramp(p, "crowd_limit", "crowd_limit_late")
 
         if target is None and trees and not dispersing and not leaving:
             t = min(trees, key=lambda o: o["distance"])
