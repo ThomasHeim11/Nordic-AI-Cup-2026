@@ -226,6 +226,14 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
   logs `api_9053.log` / `api_9054.log` there): drone :9053 with the final weights, medical :9054 with the cross-encoder
   ensemble. UPnP forwards 9052/9053/9054 are in place. Medical checked over HTTP: sample_4/5/6 through the public address
   and loopback answer in 19–32 s; their spans average tIoU 0.635 = the offline number with the ensemble on (0.550 off) → live.
+- **17:00 drone hosting diagnosis.** Inference settings (conf 0.05/0.12, flip TTA, ta-ta 0.5) all give Helsinki 0.936 —
+  irrelevant. Realtime evaluator run **from AWS Stockholm** against the public Mac URL: 387 ms/frame, 12/25 frames skipped,
+  mAP 0.39 (loopback 123 ms, 0.84; evolver running adds ~13 ms). The Mac is on **2.4 GHz 802.11n Wi-Fi** (RT-N12E is
+  2.4 GHz-only) ≈ 40–50 Mbit/s, and the evaluator uploads a 1.4 MB frame every 333 ms. Fixes: Ethernet cable (100 Mbit LAN
+  ports) and/or an AWS CPU box. CPU path built: ONNX export at 544×960 (`models/mix2_final_best.onnx`, tracked) gives the same
+  Helsinki 0.936 through the pipeline (198 ms/frame on the M1 CPU); `Dockerfile.cpu` (torch-cpu + ultralytics + onnxruntime,
+  `DRONE_WEIGHTS=models/...onnx`). Timed on the t3.micro's 2 old cores: 305 ms/frame → a c7i.2xlarge should do 50–80 ms.
+  Launching the instance needs the AWS console (no CLI/credentials on the Mac) → user.
 - Drone: `eval_recorded.py` scores a checkpoint on the 59 human-verified validation objects (38 frames of recording
   6262…; those frames were synth backgrounds → optimistic). Epoch-4 mix2 checkpoint: recall 0.95 @conf 0.1, ta-ta 0 FPs.
   `DRONE_CLASS_CONF` env adds per-class confidence thresholds.
