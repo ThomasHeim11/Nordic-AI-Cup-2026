@@ -12,8 +12,8 @@
 ## Scoreboard (official validation)
 | challenge | score | build | limiting factor |
 |---|---|---|---|
-| survival | 1177 (19 Sep 13:06) | gen19 genome, AWS t3.micro | policy endgame + ~3 network round trips per tick from Helsinki |
-| drone | 0.005 (18 Sep) | old detector, cloudflared | detector fixed since (Helsinki 0.936); hosting: home Wi-Fi cannot take 1.4 MB/333 ms → moving to AWS c7i-flex.large |
+| survival | **1213 (19 Sep 20:02)**, was 1177 | gen19 genome, lean server, AWS t3.micro | **policy only**: the evaluator keeps ONE connection for all 12 000 ticks (server log "12000 requests over 1 connections"); wall 133 ms/tick is its own sim; our wait ≈ 12 ms/tick ≪ the 600 s cap. Hetzner would gain nothing. |
+| drone | **0.157 (19 Sep 20:04)**, was 0.005 | final mix2 detector, OpenVINO fp32 on AWS c7i-flex.large | 296 requests answered, 0 errors; recording of the run pulled home (`$CLAUDE_JOB_DIR/tmp/drone_val2`, 249 frames) for analysis |
 | medical | **0.708 (19 Sep 19:15)**, was 0.698 | quote + re-rank + snap + cross-encoder ensemble, Mac 7B | passage selection (62/195 miss) |
 
 Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 points.
