@@ -72,6 +72,7 @@ def warp_point(x: float, y: float, H=None) -> Tuple[float, float]:
 # Detector
 # --------------------------------------------------------------------------- #
 WEIGHT_CANDIDATES = [
+    os.environ.get("DRONE_WEIGHTS", ""),          # explicit override, e.g. for A/B evaluation
     os.path.join(HERE, "weights", "best.pt"),
     os.path.join(HERE, "runs", "detect", "runs", "drone_s", "weights", "best.pt"),
     os.path.join(HERE, "..", "runs", "detect", "runs", "drone_s", "weights", "best.pt"),
