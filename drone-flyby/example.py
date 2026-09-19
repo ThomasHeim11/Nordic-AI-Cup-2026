@@ -114,9 +114,10 @@ class Detector:
             self.device = "mps" if torch.backends.mps.is_available() else (
                 "cuda" if torch.cuda.is_available() else "cpu")
             self.imgsz = IMGSZ
-            if path.endswith((".onnx", ".xml")):
-                # ONNX Runtime / OpenVINO backends: CPU box, no torch device, and the
-                # export has a fixed input (544x960 = a 960x540 view letterboxed at 960).
+            if path.endswith(".onnx") or "openvino_model" in path:
+                # ONNX Runtime / OpenVINO backends (OpenVINO = the export *directory*):
+                # CPU box, no torch device, and the export has a fixed input
+                # (544x960 = a 960x540 view letterboxed at 960).
                 self.device = "cpu"
                 self.imgsz = ONNX_IMGSZ
             self.model = YOLO(path, task="detect")

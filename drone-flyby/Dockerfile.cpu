@@ -13,13 +13,14 @@ WORKDIR /app
 
 # CPU-only torch (ultralytics imports it even for ONNX inference), then the rest.
 RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir "ultralytics>=8.3,<9" onnxruntime "fastapi>=0.115" "uvicorn>=0.30" \
+    && pip install --no-cache-dir "ultralytics>=8.3,<9" onnxruntime openvino "fastapi>=0.115" "uvicorn>=0.30" \
        "pydantic>=2.7,<3" "numpy>=1.26" "opencv-python-headless>=4.9" "requests>=2.31"
 
 COPY dtos.py utils.py example.py api.py ./
 # models/ is tracked in git (weights/ and cache/ are not): the ONNX export + the fitted homography.
 COPY models/ models/
 
+# Pick the backend at run time:  -e DRONE_WEIGHTS=models/mix2_final_best_int8_openvino_model/mix2_final_best.xml
 ENV DRONE_WEIGHTS=models/mix2_final_best.onnx
 ENV OMP_NUM_THREADS=8
 EXPOSE 9053
