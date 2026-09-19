@@ -239,6 +239,15 @@ def rerank_evidence(segments: Sequence[Dict], questions: Sequence[str],
             lex = lexical_span(segments, questions[qi])
             if lex is not None:
                 cands += [i for i, sg in enumerate(segments) if sg["end"] > lex[0] and sg["start"] < lex[1]]
+            if SPAN_STRATEGY.get("rerank_ce_cands"):
+                # Experiment: let the cross-encoder nominate its top lines as extra candidates.
+                try:
+                    import numpy as np
+                    import reranker
+                    sc = reranker.score(questions[qi], [sg["text"] for sg in segments])
+                    cands += [int(i) for i in np.argsort(-sc)[:int(SPAN_STRATEGY.get("rerank_ce_cands", 3))]]
+                except Exception:
+                    logger.exception("cross-encoder candidates failed")
             uniq = sorted(set(cands))
             if not uniq:
                 continue
@@ -344,7 +353,14 @@ def _ce_ensemble(segments: Sequence[Dict], questions: Sequence[str], answers: Se
             if span is not None and any(_overlap(span, (units[t]["start"], units[t]["end"])) for t in top[:k]):
                 continue
             zs = sorted(z.tolist(), reverse=True)
-            if span is None or zs[0] - zs[1] >= margin:
+            lex_agrees = False
+            if cfg.get("ce_lex_vote"):
+                # Experiment: the lexical matcher as a third voter -- if it lands on the
+                # cross-encoder's best unit, the LLM is outvoted regardless of the margin.
+                lex = lexical_span(segments, questions[qi])
+                t0 = int(top[0])
+                lex_agrees = lex is not None and _overlap(lex, (units[t0]["start"], units[t0]["end"]))
+            if span is None or zs[0] - zs[1] >= margin or lex_agrees:
                 i = int(top[0])
                 lo = hi = i
                 while lo - 1 >= 0 and z[lo - 1] >= z[i] - grow:

@@ -58,6 +58,8 @@ def main():
     ap.add_argument("--ce-top", type=int, default=2)
     ap.add_argument("--ce-margin", type=float, default=1.0)
     ap.add_argument("--ce-grow", type=float, default=0.5)
+    ap.add_argument("--rerank-ce-cands", type=int, default=0, help="experiment: add the cross-encoder's top-N lines to the re-rank candidates")
+    ap.add_argument("--ce-lex-vote", type=int, default=0, help="experiment: lexical matcher as a third voter in the span ensemble")
     a = ap.parse_args()
     sys.path.insert(0, HERE)
     import pipeline
@@ -65,7 +67,8 @@ def main():
 
     pipeline.SPAN_STRATEGY.update({"mode": a.mode, "pad": a.pad, "rerank": a.rerank, "seg_sub_min": a.seg_sub_min, "rerank_quote": a.rerank_quote, "snap": a.snap, "snap_start_tol": a.snap_start_tol, "snap_end_tol": a.snap_end_tol,
                                    "ce_weight": a.ce_weight, "llm_bonus": a.llm_bonus, "rerank_bonus": a.rerank_bonus, "unit_gap": a.unit_gap,
-                                   "ce_ens": a.ce_ens, "ce_top": a.ce_top, "ce_margin": a.ce_margin, "ce_grow": a.ce_grow})
+                                   "ce_ens": a.ce_ens, "ce_top": a.ce_top, "ce_margin": a.ce_margin, "ce_grow": a.ce_grow,
+                                   "rerank_ce_cands": a.rerank_ce_cands, "ce_lex_vote": a.ce_lex_vote})
     raw_path = os.path.join(HERE, "cache", "llm_raw.json")
     raw_cache = json.load(open(raw_path)) if os.path.exists(raw_path) else {}
     convs = group_questions_by_conversation()

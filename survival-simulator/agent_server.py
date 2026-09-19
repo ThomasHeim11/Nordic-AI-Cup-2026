@@ -35,6 +35,9 @@ from src.utils.controllers import hivemind_policy
 
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "9052"))
+# Genome file re-read at every new simulation, so a better genome can be dropped in
+# (e.g. a bind-mounted host file) without rebuilding or restarting the container.
+PARAMS_PATH = os.environ.get("SURVIVAL_PARAMS", "")
 
 log = logging.getLogger("agent_server")
 
@@ -77,6 +80,12 @@ def handle_predict(body: bytes) -> bytes:
                 hivemind_policy.reset()
                 _state["rng"] = random.Random(1)
                 log.info("new simulation detected (sim_time %.1f -> %.1f)", _state["last_sim_time"], sim_time)
+                if PARAMS_PATH:
+                    try:
+                        if hivemind_policy.load_params(PARAMS_PATH):
+                            log.warning("genome reloaded from %s", PARAMS_PATH)
+                    except Exception:
+                        log.exception("genome reload failed; keeping the current parameters")
             _state["last_sim_time"] = sim_time
             actions = [a.model_dump() for a in hivemind_policy.decide_all(states, _state["rng"])]
     except Exception:  # never let the run die on our account
@@ -126,6 +135,12 @@ async def app(scope, receive, send):
 
 
 # Warm up at import: the first call pays for lazy imports / param loading.
+if PARAMS_PATH:
+    try:
+        log.warning("genome at startup: %s (%s)", PARAMS_PATH,
+                    "loaded" if hivemind_policy.load_params(PARAMS_PATH) else "missing, using the packaged genome")
+    except Exception:
+        log.exception("genome load failed at startup; using the packaged genome")
 handle_predict(b'{"game_status":"ok","score":0,"sim_time":0,"n_agents":0,"agent_status":[]}')
 hivemind_policy.reset()
 _state["last_sim_time"] = -1.0
