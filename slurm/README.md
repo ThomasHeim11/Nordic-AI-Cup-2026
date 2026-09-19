@@ -7,6 +7,7 @@ Each job expects its code folder in `~` (`~/survival-simulator`, `~/drone-flyby`
 | job | submit | log |
 |---|---|---|
 | survival evolver (CPU) | `sbatch ~/slurm/survival_evolve.sbatch` | `surv-evolve-<id>.log` (`grep ^gen`) |
+| survival evolver, continue on ARM CPU node | `sbatch ~/slurm/survival_evolve_arm.sbatch 7 evo_a` | `surv-evo-arm-<id>.log` (`grep ^gen`), genome in `~/survival-simulator/evo_a.json` |
 | survival RL: clone → score → PPO (GPU) | `sbatch ~/slurm/survival_rl.sbatch` | `surv-rl-<id>.log` (`grep -E "^\[|^iter"`) |
 | score one PPO checkpoint | `sbatch ~/slurm/survival_eval_ckpt.sbatch rl/weights/ppo/iter_0050.pt` | `surv-eval-<id>.log` |
 | drone training (GPU) | `sbatch ~/slurm/drone_train.sbatch` | `drone-train-<id>.log` |

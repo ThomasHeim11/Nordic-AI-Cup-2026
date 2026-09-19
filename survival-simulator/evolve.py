@@ -108,7 +108,10 @@ def main():
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--sigma", type=float, default=0.15)
     ap.add_argument("--rng-seed", type=int, default=42)
+    ap.add_argument("--out", default=OUT, help="where the best-so-far genome is written (default: the live params file)")
     a = ap.parse_args()
+    global OUT
+    OUT = a.out
 
     from src.utils.controllers import hivemind_policy as hp
     base = clamp({k: hp.PARAMS[k] for k in BOUNDS})
