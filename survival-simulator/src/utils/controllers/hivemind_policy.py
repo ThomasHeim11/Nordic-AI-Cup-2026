@@ -95,6 +95,10 @@ PARAMS: Dict[str, float] = {
     "memory_ttl": 110.0,         # seconds a remembered tree stays valid (trees die at 50-100 s)
     "memory_visit_radius": 45.0, # within this of a remembered tree counts as visited
     "memory_revisit_after": 25.0,# seconds before a visited tree is worth another look
+    # --- shared tree map: agents that see each other merge their coordinate frames,
+    # so a tree one animal saw is a destination for the whole lineage ---
+    "memory_shared": 0.0,        # 1 = lineage-shared map; measured neutral on 24 maps (1036 vs 1065, sd 238)
+    "memory_shared_visited": 1.0,# 1 = a tree a mate is camping counts as visited for me too
     # --- dispersal / barren patch ---
     "disperse_seconds": 0.0,     # newborn dispersal walk; measured -60 on 24 seeds -> off
     "barren_seconds": 1e6,       # leave a fruitless tree after this long; measured harmful -> off
@@ -117,8 +121,13 @@ def load_params(path: str = PARAMS_FILE) -> bool:
 
 load_params()
 
-# Per-agent scratch memory (wander heading).  Keyed by agent_id.
+# Per-agent scratch memory (wander heading, dead-reckoned pose).  Keyed by agent_id.
 _MEMORY: Dict[int, Dict[str, float]] = {}
+# Shared maps.  Every agent's pose lives in a coordinate frame; frames merge when
+# two agents see each other (see _sync_frames), and the remembered trees of a
+# frame are visible to every agent in it.  Keyed by frame id (= id of the agent
+# that founded the frame).
+_FRAMES: Dict[int, Dict[str, list]] = {}
 _RNG = random.Random(0xC0FFEE)
 # Species clock: one decide_all call per simulator tick (0.1 s).  The request
 # does not carry the sim time per agent, so we count ticks ourselves.
@@ -128,6 +137,7 @@ _CLOCK = {"t": 0.0}
 def reset() -> None:
     """Drop all per-run state.  Call between simulations."""
     _MEMORY.clear()
+    _FRAMES.clear()
     _CLOCK["t"] = 0.0
 
 
@@ -235,32 +245,136 @@ def _separation(mates: Sequence[dict], radius: float, gain: float) -> Tuple[floa
     return px, py
 
 
+def _init_mem(state: dict, rng: random.Random) -> dict:
+    """Create the scratch memory for an agent we have not seen before.
+
+    The pose starts at the origin of a brand-new frame owned by this agent;
+    _sync_frames merges it into the parent's frame on the first tick a mate
+    (normally the parent, 10-30 units away) sees the newborn.
+    """
+    agent_id = state["agent_id"]
+    mem = _MEMORY[agent_id] = {"wander": rng.uniform(-math.pi, math.pi),
+                               "x": 0.0, "y": 0.0, "heading": 0.0, "t": 0.0,
+                               "frame": agent_id,
+                               "disperse_until": -1.0, "last_fruit_t": 0.0, "leave_until": -1.0}
+    _FRAMES.setdefault(agent_id, {"trees": []})
+    if state.get("age", 99.0) < 0.5:
+        # Newborn: pick a direction away from the nearest mate (the parent)
+        # and commit to it, so the lineage spreads instead of piling up.
+        mates = [o for o in state["observations"] if o.get("type") == "Agent"]
+        nearest = min(mates, key=lambda o: o["distance"]) if mates else None
+        away = _wrap(nearest["angle"] + math.pi) if nearest else rng.uniform(-math.pi, math.pi)
+        mem["wander"] = away
+        mem["disperse_until"] = PARAMS["disperse_seconds"]
+    return mem
+
+
+def _trees_of(mem: dict) -> list:
+    return _FRAMES.setdefault(mem["frame"], {"trees": []})["trees"]
+
+
+def _merge_frames(src: int, dst: int, dtheta: float, ox: float, oy: float, nx: float, ny: float) -> None:
+    """Move every agent and tree of frame ``src`` into frame ``dst``.
+
+    The rigid transform is fixed by one agent whose pose is known in both
+    frames: (ox, oy) in ``src`` maps to (nx, ny) in ``dst`` and headings gain
+    ``dtheta``.
+    """
+    c, s = math.cos(dtheta), math.sin(dtheta)
+
+    def tf(x, y):
+        rx, ry = x - ox, y - oy
+        return nx + rx * c - ry * s, ny + rx * s + ry * c
+
+    for m in _MEMORY.values():
+        if m["frame"] == src:
+            m["x"], m["y"] = tf(m["x"], m["y"])
+            m["heading"] = _wrap(m["heading"] + dtheta)
+            m["wander"] = _wrap(m["wander"] + dtheta)
+            m["frame"] = dst
+    dst_trees = _FRAMES.setdefault(dst, {"trees": []})["trees"]
+    for t in _FRAMES.pop(src, {"trees": []})["trees"]:
+        tx, ty = tf(t["x"], t["y"])
+        for u in dst_trees:
+            if math.hypot(u["x"] - tx, u["y"] - ty) < 30.0:
+                if t["seen"] > u["seen"]:
+                    u["x"], u["y"], u["seen"] = tx, ty, t["seen"]
+                for k, v in t["visited"].items():
+                    u["visited"][k] = max(u["visited"].get(k, -1e9), v)
+                break
+        else:
+            dst_trees.append({"x": tx, "y": ty, "seen": t["seen"], "visited": dict(t["visited"])})
+
+
+def _sync_frames(states: Sequence[dict]) -> None:
+    """Merge the coordinate frames of agents that can see each other.
+
+    Observer A sees mate B at (d, theta_ab) with rel_dir = bearing of A as seen
+    from B in B's own frame.  In A's frame B's heading is rot = theta_ab + pi -
+    rel_dir (the same identity relay_threats uses), which fixes B's pose in
+    A's frame -- or A's pose in B's frame -- and therefore the rigid transform
+    between the two frames.  The younger frame (larger founder id) is folded
+    into the older one so the whole lineage converges on one map.
+    """
+    for st in states:
+        a = _MEMORY.get(st["agent_id"])
+        if a is None:
+            continue
+        for o in st["observations"]:
+            if o.get("type") != "Agent" or "id" not in o or "rel_dir" not in o:
+                continue
+            b = _MEMORY.get(o["id"])
+            if b is None or b["frame"] == a["frame"]:
+                continue
+            d, theta_ab, rel_dir = o["distance"], o["angle"], o["rel_dir"]
+            rot = theta_ab + math.pi - rel_dir
+            if a["frame"] < b["frame"]:
+                # B's pose expressed in A's frame.
+                ang = a["heading"] + theta_ab
+                nx, ny = a["x"] + d * math.cos(ang), a["y"] + d * math.sin(ang)
+                nh = a["heading"] + rot
+                _merge_frames(b["frame"], a["frame"], _wrap(nh - b["heading"]), b["x"], b["y"], nx, ny)
+            else:
+                # A's pose expressed in B's frame: A sits at bearing rel_dir from B.
+                ang = b["heading"] + rel_dir
+                nx, ny = b["x"] + d * math.cos(ang), b["y"] + d * math.sin(ang)
+                nh = b["heading"] - rot
+                _merge_frames(a["frame"], b["frame"], _wrap(nh - a["heading"]), a["x"], a["y"], nx, ny)
+
+
 def _remember_trees(mem: dict, trees: Sequence[dict], p: Dict[str, float]) -> None:
-    """Add visible trees to the agent's own-frame map (deduped, with a timestamp)."""
+    """Add visible trees to the frame's map (deduped, with a timestamp)."""
     now = mem["t"]
-    mem["trees"] = [t for t in mem["trees"] if now - t["seen"] < p["memory_ttl"]]
+    frame = _FRAMES.setdefault(mem["frame"], {"trees": []})
+    frame["trees"] = [t for t in frame["trees"] if now - t["seen"] < p["memory_ttl"]]
+    lst = frame["trees"]
     for o in trees:
         ang = mem["heading"] + o["angle"]
         tx = mem["x"] + o["distance"] * math.cos(ang)
         ty = mem["y"] + o["distance"] * math.sin(ang)
-        for t in mem["trees"]:
+        for t in lst:
             if math.hypot(t["x"] - tx, t["y"] - ty) < 30.0:
                 t["x"], t["y"], t["seen"] = tx, ty, now
                 break
         else:
-            mem["trees"].append({"x": tx, "y": ty, "seen": now, "visited": -1e9})
-    # mark trees we are standing next to as visited
-    for t in mem["trees"]:
+            lst.append({"x": tx, "y": ty, "seen": now, "visited": {}})
+    # mark trees we are standing next to as visited (by us)
+    me = mem.get("id")
+    for t in lst:
         if math.hypot(t["x"] - mem["x"], t["y"] - mem["y"]) < p["memory_visit_radius"]:
-            t["visited"] = now
+            t["visited"][me] = now
 
 
 def _remembered_target(mem: dict, p: Dict[str, float]):
     """Relative angle to the nearest remembered tree worth a visit, or None."""
     now = mem["t"]
+    me = mem.get("id")
+    shared = p["memory_shared_visited"] > 0.5
     best, best_d = None, 1e9
-    for t in mem["trees"]:
-        if now - t["visited"] < p["memory_revisit_after"]:
+    for t in _trees_of(mem):
+        vis = t["visited"]
+        last = max(vis.values(), default=-1e9) if shared else vis.get(me, -1e9)
+        if now - last < p["memory_revisit_after"]:
             continue
         d = math.hypot(t["x"] - mem["x"], t["y"] - mem["y"])
         if d < best_d:
@@ -306,16 +420,8 @@ def decide(state: dict, may_spawn: bool, rng: random.Random, spawn_energy: float
     fruits, trees, mates, predators, edges = _split(state["observations"])
     mem = _MEMORY.get(agent_id)
     if mem is None:
-        mem = _MEMORY[agent_id] = {"wander": rng.uniform(-math.pi, math.pi),
-                                   "x": 0.0, "y": 0.0, "heading": 0.0, "t": 0.0, "trees": [],
-                                   "disperse_until": -1.0, "last_fruit_t": 0.0, "leave_until": -1.0}
-        if state.get("age", 99.0) < 0.5:
-            # Newborn: pick a direction away from the nearest mate (the parent)
-            # and commit to it, so the lineage spreads instead of piling up.
-            nearest = min(mates, key=lambda o: o["distance"]) if mates else None
-            away = _wrap(nearest["angle"] + math.pi) if nearest else rng.uniform(-math.pi, math.pi)
-            mem["wander"] = away
-            mem["disperse_until"] = PARAMS["disperse_seconds"]
+        mem = _init_mem(state, rng)
+    mem["id"] = agent_id
     p = PARAMS
     _remember_trees(mem, trees, p)
     if fruits:
@@ -553,6 +659,14 @@ def decide_all(agent_states: Sequence[dict], rng: random.Random = None) -> List[
     p = PARAMS
     if pop == 0:
         return []
+    if p["memory_shared"] > 0.5:
+        for s in states:
+            if s["agent_id"] not in _MEMORY:
+                _init_mem(s, rng)["id"] = s["agent_id"]
+        _sync_frames(states)
+        live_frames = {m["frame"] for m in _MEMORY.values()}
+        for dead in [f for f in _FRAMES if f not in live_frames]:
+            del _FRAMES[dead]
     # Food per capita, from what the species can currently see.  Breeding into
     # a stripped map is what produces the boom-bust crashes.
     n_fruit = sum(1 for s in states for o in s["observations"] if o.get("type") == "Fruit")

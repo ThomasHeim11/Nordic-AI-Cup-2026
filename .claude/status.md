@@ -182,3 +182,27 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
   (old 0.903 model: ta-ta 244 FPs, ~0 real objects). Helsinki pipeline 0.856 (old 0.903). Final pick after epoch 20 (~15:30).
 - Sat 12:58: AWS Stockholm survival endpoint http://16.170.155.200:9052 live (see deploy.md); validation queued (pos 6).
 - Sat 13:06: survival via AWS Stockholm validated **1177, no errors** (natural end, ~40 ms/tick). Latency solved; score now = policy. Next: continue evolution on cluster ARM nodes (slurm/survival_evolve_arm.sbatch), bench on 24 maps, deploy best to AWS via git pull.
+
+## Sat 19 Sep afternoon (branch worktree-survival-fast-server) — cluster abandoned, everything local
+- **Cluster is not used any more** (too many failures). All training/evolution on the Mac; survival serves from AWS.
+- **Survival latency anatomy** (measured): server compute < 1 ms; the FastAPI container answers in 3.2 ms on the AWS box;
+  Mac→AWS 20 ms with keep-alive vs 50 ms with a new connection per request (a 27 KB body needs ~3 round trips:
+  handshake + slow start). The 600 s wait rule therefore caps the run at ~600/(3·RTT+server) ticks. Only geography
+  (Hetzner Helsinki = evaluator's own DC, paid) removes round trips; server-side we can only shave milliseconds.
+- Lean ASGI server (`agent_server.py`: orjson, uvloop, httptools, no pydantic on the hot path): **3.2 → 1.3 ms** per
+  request on AWS; bit-identical actions over 4000 replayed ticks. Image `survival:fast` is built on the AWS box and
+  staged on port 9153 (`--network host`). **Swap into 9052 = human action** (classifier blocks the deploy):
+  `sudo docker rm -f survival_fast survival; sudo docker run -d --restart unless-stopped --network host -e PORT=9052 --name survival survival:fast`.
+  It also logs "N requests over M connections" every 2000 ticks → the next validation tells us if the evaluator reuses connections.
+- Games over HTTP are **not repeatable** (same seed, same code: 1196 vs 1374): the bench sd of ~300 is real noise, use ≥ 24 maps.
+- 3000 s sim without agents: trees never run out (seed 201: 33 trees @900 s, 13 @1800 s, 5 @3000 s; fruits 84 → 20 → 14)
+  but predators climb 0 → 8 @900 s → 16 @1800 s → 23 @3000 s. Individuals cannot outlive ~max_age(60–120 s)+ageing;
+  the species lives as long as births continue = as long as animals keep finding the (sparse, moving) trees.
+- Baseline bench (this Mac, training running): gen19 genome **967 mean / sd 315 / min 242 / max 1742**, deaths starved 1950 vs eaten 816.
+- Implemented the **shared tree map**: agents that see each other merge dead-reckoning frames (same identity as
+  relay_threats), newborns inherit the parent's frame, trees remembered by anyone become targets for everyone
+  (`memory_shared`, `memory_shared_visited` params). Geometry unit-tested exact. Bench pending (see below).
+- Medical: baseline re-confirmed 0.706 offline; snap-tolerance / mode / pad sweeps running from the cached LLM replies.
+- Drone: `eval_recorded.py` scores a checkpoint on the 59 human-verified validation objects (38 frames of recording
+  6262…; those frames were synth backgrounds → optimistic). Epoch-4 mix2 checkpoint: recall 0.95 @conf 0.1, ta-ta 0 FPs.
+  `DRONE_CLASS_CONF` env adds per-class confidence thresholds.
