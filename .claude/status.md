@@ -208,6 +208,14 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
   **Cross-encoder ensemble** (`pipeline._ce_ensemble`, fold models for the test): keep the LLM span if it overlaps one of the
   CE's top-2 units, else take the CE unit (grown 0.5 z) when its margin ≥ 1.0 → held-out tIoU 0.526 → 0.556, **offline 0.724**.
   Default on; `example.py` warms the CE. Not yet validated online.
+- Survival endgame (bench logs every 20 s): the species dies with 20–40 fruits and 12–20 trees still on the map, 1–5 animals at
+  energy 50–100 that cannot reach food fast enough; predators 10–15 by 1500 s. Deaths are mostly old-age drain (0.01·age per
+  tick past max_age 60–120 s), so continuity = births. Added `crowd_limit_late` (ramps with late_t0/t1, default = current) for
+  the evolver. **evolve.py had a SyntaxError since the --out commit (global OUT after use) — fixed.**
+- Unattended chain (scripts + logs in `~/.claude/jobs/1c488450/tmp/`): `after_train.sh` (waits for the YOLO run, scores
+  best/last/epoch-4 on the recordings + Helsinki, installs the winner, starts :9053/:9054 from main, UPnP) → `restart_from_branch.sh`
+  (restarts both servers from the branch worktree) → `drone_exp.sh` (eval_recorded + Helsinki with conf 0.12/0.05, flip TTA,
+  ta-ta 0.5) → `evolve_after.sh` (niced local evolver, 80 gens × 12 × 6 seeds, genome → `survival-simulator/evo_mac_a.json` in the worktree).
 - Drone: `eval_recorded.py` scores a checkpoint on the 59 human-verified validation objects (38 frames of recording
   6262…; those frames were synth backgrounds → optimistic). Epoch-4 mix2 checkpoint: recall 0.95 @conf 0.1, ta-ta 0 FPs.
   `DRONE_CLASS_CONF` env adds per-class confidence thresholds.
