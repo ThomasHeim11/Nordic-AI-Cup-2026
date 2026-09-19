@@ -18,6 +18,7 @@ The three parts and why they exist:
 """
 
 import glob
+import json
 import logging
 import math
 import os
@@ -78,6 +79,18 @@ WEIGHT_CANDIDATES = [
     os.path.join(HERE, "..", "runs", "detect", "runs", "drone_s", "weights", "last.pt"),
 ]
 CONF_THRESHOLD = float(os.environ.get("DRONE_CONF", "0.12"))
+# Per-class confidence thresholds, e.g. DRONE_CLASS_CONF='{"ta-ta": 0.5, "jammer": 0.05}'
+# (class names from dtos.OBJECT_CLASSES; unlisted classes use CONF_THRESHOLD).
+# Macro mAP rewards recall on rare classes and punishes a class that only ever
+# produces false positives, so the thresholds are fitted per class on the
+# recorded validation views (eval_recorded.py).
+try:
+    from dtos import OBJECT_CLASSES as _CLASSES
+    _cc = json.loads(os.environ.get("DRONE_CLASS_CONF", "{}"))
+    CLASS_CONF = {_CLASSES.index(k): float(v) for k, v in _cc.items() if k in _CLASSES}
+except Exception:
+    CLASS_CONF = {}
+_MIN_CONF = min([CONF_THRESHOLD] + list(CLASS_CONF.values()))
 NMS_IOU = 0.5
 IMGSZ = 960
 
@@ -122,7 +135,7 @@ class Detector:
         return out
 
     def _run(self, image: np.ndarray):
-        results = self.model.predict(image, imgsz=IMGSZ, conf=CONF_THRESHOLD, iou=NMS_IOU,
+        results = self.model.predict(image, imgsz=IMGSZ, conf=_MIN_CONF, iou=NMS_IOU,
                                      device=self.device, verbose=False, max_det=200)
         out = []
         for r in results:
@@ -132,6 +145,8 @@ class Detector:
             conf = r.boxes.conf.cpu().numpy()
             cls = r.boxes.cls.cpu().numpy().astype(int)
             for (x1, y1, x2, y2), c, k in zip(xyxy, conf, cls):
+                if c < CLASS_CONF.get(int(k), CONF_THRESHOLD):
+                    continue
                 out.append((int(k), float(c), float(x1), float(y1), float(x2), float(y2)))
         return out
 
