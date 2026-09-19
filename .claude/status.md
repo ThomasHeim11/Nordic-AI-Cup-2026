@@ -234,6 +234,12 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
   Helsinki 0.936 through the pipeline (198 ms/frame on the M1 CPU); `Dockerfile.cpu` (torch-cpu + ultralytics + onnxruntime,
   `DRONE_WEIGHTS=models/...onnx`). Timed on the t3.micro's 2 old cores: 305 ms/frame → a c7i.2xlarge should do 50–80 ms.
   Launching the instance needs the AWS console (no CLI/credentials on the Mac) → user.
+- **Sat 20:50 survival A/B round (24 maps, pairs run concurrently):** base 1008 / 1049 (sd 290 / 232); crowd_limit_late 2 →
+  1077 (+28); late_pop 10 + late_t1 2000 → 996 (−12); wander_jitter 0.05 → 936 (−72). Nothing beyond the ±50 noise floor;
+  the evolved genome sits on a plateau for single-parameter moves. Evolver restarted (niced, 5 workers, 6 seeds/gen) for the
+  night → `survival-simulator/evo_mac_a.json` (worktree); bench any candidate on 24 maps vs base before deploying.
+- **Sat 20:33 drone fine-tune `mix3_s` started** (Helsinki + synth2 + synth3, 12 epochs, from mix2_final_best; run dir
+  `Nordic-AI-Cup-2026/runs/detect/runs/mix3_s`, ~25 min/epoch once the CPU is free). Medical server stopped for memory.
 - Drone: `eval_recorded.py` scores a checkpoint on the 59 human-verified validation objects (38 frames of recording
   6262…; those frames were synth backgrounds → optimistic). Epoch-4 mix2 checkpoint: recall 0.95 @conf 0.1, ta-ta 0 FPs.
   `DRONE_CLASS_CONF` env adds per-class confidence thresholds.
