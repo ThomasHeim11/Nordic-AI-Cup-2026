@@ -1,0 +1,24 @@
+path: /Users/thomasheim/Programming/AI-Cup 26/NorskAICup26/drone-flyby/data
+train:
+  - yolo/images/train
+  - synth2/images/train
+val:
+  - yolo/images/val
+  - synth2/images/val
+names:
+  0: hangar
+  1: helicopter
+  2: jet_plane
+  3: large_launcher
+  4: large_tower
+  5: medium_launcher
+  6: medium_plane
+  7: mine_roller
+  8: small_launcher
+  9: small_plane
+  10: small_tower
+  11: ta-ta
+  12: tank
+  13: condor
+  14: jammer
+  15: spacecraft

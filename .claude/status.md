@@ -158,3 +158,19 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
 - [ ] Tomorrow on the A40: 14B (and 32B-4bit if it installs) in quote mode AND units mode; pick best.
 - [ ] Ideas: per-question prompts with KV-cache reuse; larger embedder for candidates;
       ask for line + quote in the re-rank pass; Qwen2.5-14B-4bit if latency allows (unlikely).
+
+## Sat 19 Sep — drone diagnosis (recorded validation frames)
+- Validation scene = Copenhagen-style Google-Earth terrain, ~15 sparse rendered objects. Verified by eye (mine_recordings.py):
+  hangar + 2 jet_plane on dry field, 4-6 small_plane (red wing tips) on a lot, large_tower (lattice) x1-2, helicopter by water,
+  small_tower (green roof on stone plinth) x1-2, tank x1-2, jammer x1.
+- Why validation scored 0.005: (1) model calls every orange roof / dark car "ta-ta" at 0.5-0.9 — Helsinki ta-ta always sits on red clay;
+  (2) jets called "condor" (dry-grass bias), small planes called "ta-ta"; (3) first synth run used recorded frames as *unlabelled*
+  background -> taught the model the hangar/jets are background (synth model: 2 boxes in 80 frames, Helsinki 0.863).
+- Fix in progress: make_synth.py --mined (59 verified validation cutouts, real boxes written for labelled frames, scale jitter 0.75-1.3),
+  dataset data/synth2 (4000 JPEG), data/mix2.yaml = Helsinki + synth2; fine-tune from weights/best.pt (0.903 Helsinki).
+- weights/best.pt still = drone_s2 (0.903). Mac synth model saved as weights/synth_mac_s.pt (do not serve).
+- Survival: cluster evolver gen 19 genome (survival-simulator/evolved_gen19.json) benches 1123 mean / max 2123 on seeds 201-224
+  vs 1002 baseline -> deployed to src/utils/controllers/hivemind_params.json (old one kept as hivemind_params.json.bak_1002). PPO abandoned (243 s).
+- Medical on cluster abandoned: qa_eval --transcribe-only did 2/39 conversations in 9 h (GPU idle). Serve Mac 7B (0.698).
+- Cluster GPU now reserved for drone: upload drone_synth2.tgz (scp -P 60441 ... dnat.simula.no), train from best_0903.pt on data/mix2.yaml.
+- Sat 19 Sep 10:27 CEST: survival validation with evolved genome via UPnP direct: 1006 (16 min wall, 600 s wait rule). Hosting still the ceiling.

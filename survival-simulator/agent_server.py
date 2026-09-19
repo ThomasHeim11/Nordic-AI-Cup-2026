@@ -1,4 +1,5 @@
 import logging
+import os
 import random
 import threading
 
@@ -8,7 +9,7 @@ from src.utils.DTOs import StepResponse
 from src.utils.controllers import hivemind_policy
 
 HOST = "0.0.0.0"
-PORT = 9052
+PORT = int(os.environ.get("PORT", "9052"))
 
 log = logging.getLogger("agent_server")
 app = FastAPI(title="Survival Simulator Agent Endpoint")
@@ -51,4 +52,4 @@ def index():
 if __name__ == "__main__":
     import uvicorn
     logging.basicConfig(level=logging.INFO)
-    uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
+    uvicorn.run(app, host=HOST, port=PORT, log_level=os.environ.get("AGENT_LOG_LEVEL", "warning"))

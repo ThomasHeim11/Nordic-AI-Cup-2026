@@ -9,6 +9,14 @@ are kept as negatives so the detector learns that bushes and cars are not
 targets.
 
     python make_synth.py --out data/synth --n 3000 --recordings recordings
+    python make_synth.py --out data/synth2 --n 4000 --recordings recordings_site --mined cache/mined_objects.json
+
+--mined adds human-verified cutouts from the recorded validation views
+(mine_recordings.py): objects in the *validation* rendering, which differs
+from Helsinki (darker shading, dry grass, Copenhagen-style terrain).  Any
+recorded frame that contains a verified object is also labelled with that
+object's real box whenever it is used as a background, so the model is never
+taught that those objects are background.
 """
 import argparse, glob, json, os, random
 from pathlib import Path
@@ -75,6 +83,24 @@ def paste(bg, patch, box, scale, rng):
     return (x0 + bx1 * scale, y0 + by1 * scale, x0 + bx2 * scale, y0 + by2 * scale)
 
 
+LEVEL_SCALE = {0: 0.25, 1: 0.5, 2: 1.0}      # view pixels per 4K source pixel
+
+
+def load_mined(path, margin=2):
+    """Verified validation cutouts -> {class: [(patch, box, source_scale)]} and {frame: [(cls, box)]}."""
+    by_class, by_frame = {}, {}
+    for o in json.load(open(path)):
+        img = cv2.imread(o["file"])
+        x1, y1, x2, y2 = [int(round(v)) for v in o["bbox"]]
+        X1, Y1 = max(0, x1 - margin), max(0, y1 - margin)
+        X2, Y2 = min(img.shape[1], x2 + margin), min(img.shape[0], y2 + margin)
+        lvl = int(os.path.basename(o["file"]).split("_L")[1][0])
+        name = OBJECT_CLASSES[o["cls"]]
+        by_class.setdefault(name, []).append((img[Y1:Y2, X1:X2].copy(), (x1 - X1, y1 - Y1, x2 - X1, y2 - Y1), LEVEL_SCALE[lvl]))
+        by_frame.setdefault(os.path.abspath(o["file"]), []).append((o["cls"], (x1, y1, x2, y2)))
+    return by_class, by_frame
+
+
 def helsinki_background(level, rng, frame_cache):
     f = rng.choice(frame_numbers())
     img = frame_cache.setdefault(f, load_frame(f))
@@ -93,6 +119,9 @@ def main():
     ap.add_argument("--val-frac", type=float, default=0.08)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--jpeg", type=int, default=0, help="if >0, write JPEG at this quality instead of PNG")
+    ap.add_argument("--mined", default="", help="verified validation cutouts from mine_recordings.py")
+    ap.add_argument("--mined-frac", type=float, default=0.5, help="share of pasted objects drawn from the mined pool when the class has one")
+    ap.add_argument("--rec-frac", type=float, default=0.7, help="share of backgrounds taken from recorded views")
     a = ap.parse_args()
     rng = random.Random(a.seed)
     out = Path(a.out)
@@ -105,6 +134,9 @@ def main():
     for name, p, b in patches:
         by_class.setdefault(name, []).append((p, b))
     print("patches per class:", {k: len(v) for k, v in by_class.items()})
+    mined, mined_frames = load_mined(a.mined) if a.mined else ({}, {})
+    if mined:
+        print("mined cutouts per class:", {k: len(v) for k, v in mined.items()}, "| labelled frames:", len(mined_frames))
 
     rec = []
     for png in glob.glob(os.path.join(a.recordings, "*", "*.png")):
@@ -121,9 +153,11 @@ def main():
     for i in range(a.n):
         split = "val" if rng.random() < a.val_frac else "train"
         # backgrounds: 70% recorded validation terrain, 30% Helsinki
-        if rec and rng.random() < 0.7:
+        real_labels = []
+        if rec and rng.random() < a.rec_frac:
             lvl, png = rng.choice(rec)
             bg = cv2.imread(png)
+            real_labels = mined_frames.get(os.path.abspath(png), [])
         else:
             lvl = rng.choice([0, 1, 1, 2, 2])
             bg = helsinki_background(lvl, rng, frame_cache)
@@ -133,15 +167,22 @@ def main():
             hsv = cv2.cvtColor(bg, cv2.COLOR_BGR2HSV).astype(np.float32)
             hsv[..., 1] *= rng.uniform(0.7, 1.3); hsv[..., 2] *= rng.uniform(0.75, 1.25)
             bg = cv2.cvtColor(np.clip(hsv, 0, 255).astype(np.uint8), cv2.COLOR_HSV2BGR)
-        labels = []
+        labels = [(c, (x1 + x2) / 2 / VW, (y1 + y2) / 2 / VH, (x2 - x1) / VW, (y2 - y1) / VH) for c, (x1, y1, x2, y2) in real_labels]
         if rng.random() >= a.neg_frac:
             scale = {0: 0.25, 1: 0.5, 2: 1.0}[lvl]
             k_obj = rng.randint(1, 6)
             for _ in range(k_obj):
-                name = rng.choice(list(by_class))
-                p, b = rng.choice(by_class[name])
+                name = rng.choice(sorted(set(by_class) | set(mined)))
+                src_scale = 1.0
+                if name in mined and (name not in by_class or rng.random() < a.mined_frac):
+                    p, b, src_scale = rng.choice(mined[name])
+                else:
+                    p, b = rng.choice(by_class[name])
                 p, b = orient(p, b, rng.randint(0, 3), rng.random() < 0.5)
-                box = paste(bg, p, b, scale * rng.uniform(0.9, 1.1), rng)
+                s = scale * rng.uniform(0.75, 1.3) / src_scale
+                if s > 2.2:                      # do not blow a small L1 cutout up to mush
+                    continue
+                box = paste(bg, p, b, s, rng)
                 if box is None:
                     continue
                 x1, y1, x2, y2 = box
