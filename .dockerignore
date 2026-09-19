@@ -1,0 +1,7 @@
+*
+!survival-simulator/requirements-server.txt
+!survival-simulator/agent_server.py
+!survival-simulator/src/utils/DTOs.py
+!survival-simulator/src/utils/controllers/
+survival-simulator/src/utils/controllers/__pycache__/
+survival-simulator/src/utils/controllers/*.bak_*
