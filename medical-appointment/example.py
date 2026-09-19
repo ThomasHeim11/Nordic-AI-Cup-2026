@@ -44,6 +44,13 @@ def _warm_up() -> None:
         logger.info("LLM warm in %.1fs", time.perf_counter() - t0)
     except Exception:
         logger.exception("LLM warm-up failed")
+    try:
+        t0 = time.perf_counter()
+        import reranker
+        reranker.score("Is the dose 100 mg daily?", ["The dose is 100 mg daily.", "Take it with food.", "See you next month."])
+        logger.info("cross-encoder warm in %.1fs", time.perf_counter() - t0)
+    except Exception:
+        logger.exception("cross-encoder warm-up failed (span ensemble will fall back to LLM spans)")
 
 
 _warm_up()

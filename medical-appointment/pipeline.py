@@ -186,7 +186,9 @@ def parse_answers(text: str, n: int) -> List[Tuple[Optional[bool], Optional[int]
     return out
 
 
-SPAN_STRATEGY = {"mode": "quote", "pad": 0.0, "rerank": 1, "seg_sub_min": 0.5, "rerank_quote": 0, "snap": 1, "snap_start_tol": 0.4, "snap_end_tol": 0.2}   # best on question_train.csv: 0.700
+SPAN_STRATEGY = {"mode": "quote", "pad": 0.0, "rerank": 1, "seg_sub_min": 0.5, "rerank_quote": 0, "snap": 1, "snap_start_tol": 0.4, "snap_end_tol": 0.2,
+                 # cross-encoder second opinion (see _ce_ensemble): held-out tIoU 0.526 -> 0.556 on question_train.csv
+                 "ce_ens": 1, "ce_top": 2, "ce_margin": 1.0, "ce_grow": 0.5}
 
 RERANK_SYSTEM = """You are checking which transcript line is the evidence for a yes/no question that was answered YES.
 For each question you get a few candidate lines from the transcript. Pick the ONE line whose words most literally and directly state the fact the question asks about (same drug, same number, same finding, same action). Prefer the line containing the specific detail over a vague or paraphrased one.
@@ -298,7 +300,62 @@ def answer_all(segments: Sequence[Dict], questions: Sequence[str], deadline: Opt
     if SPAN_STRATEGY.get("rerank") and not can_rerank:
         logger.warning("skipping re-rank pass: %.1fs left", (deadline - time.perf_counter()) if deadline else -1)
     chosen = rerank_evidence(segments, questions, parsed, raw_cache) if can_rerank else {}
-    return _finish(segments, questions, parsed, chosen)
+    answers, spans = _finish(segments, questions, parsed, chosen)
+    if SPAN_STRATEGY.get("ce_ens") and (deadline is None or time.perf_counter() < deadline - 4.0):
+        spans = _ce_ensemble(segments, questions, answers, spans)
+    return answers, spans
+
+
+def _overlap(a: Span, b: Span) -> bool:
+    return a[0] < b[1] and b[0] < a[1]
+
+
+def _ce_ensemble(segments: Sequence[Dict], questions: Sequence[str], answers: Sequence[bool],
+                 spans: List[Optional[Span]]) -> List[Optional[Span]]:
+    """Second opinion from the learned cross-encoder (reranker.py) over silence units.
+
+    The LLM's quote and the cross-encoder pick the right passage about equally
+    often (~68 %) but on different questions.  Rule (fitted on held-out folds):
+    keep the LLM span when it overlaps one of the cross-encoder's top ``ce_top``
+    units; otherwise, when the cross-encoder is confident (z-score margin
+    between its best and second unit >= ``ce_margin``) or the LLM gave no span,
+    take the cross-encoder's best unit grown to neighbours within ``ce_grow``.
+    Never raises; ~0.3 s per conversation on the Mac.
+    """
+    cfg = SPAN_STRATEGY
+    try:
+        import numpy as np
+        import reranker
+        import units_mode
+        units = units_mode.build_units(segments)
+        if len(units) < 3:
+            return spans
+        k = int(cfg.get("ce_top", 2))
+        margin = float(cfg.get("ce_margin", 1.0))
+        grow = float(cfg.get("ce_grow", 0.5))
+        texts = [u["text"] for u in units]
+        out = list(spans)
+        for qi, (ans, span) in enumerate(zip(answers, spans)):
+            if not ans:
+                continue
+            sc = reranker.score(questions[qi], texts).astype(np.float64)
+            z = (sc - sc.mean()) / (sc.std() + 1e-6)
+            top = np.argsort(-z)
+            if span is not None and any(_overlap(span, (units[t]["start"], units[t]["end"])) for t in top[:k]):
+                continue
+            zs = sorted(z.tolist(), reverse=True)
+            if span is None or zs[0] - zs[1] >= margin:
+                i = int(top[0])
+                lo = hi = i
+                while lo - 1 >= 0 and z[lo - 1] >= z[i] - grow:
+                    lo -= 1
+                while hi + 1 < len(z) and z[hi + 1] >= z[i] - grow:
+                    hi += 1
+                out[qi] = (round(units[lo]["start"], 2), round(units[hi]["end"], 2))
+        return out
+    except Exception:
+        logger.exception("cross-encoder ensemble failed; keeping LLM spans")
+        return spans
 
 
 def _finish(segments, questions, parsed, chosen):
