@@ -202,7 +202,12 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
 - Implemented the **shared tree map**: agents that see each other merge dead-reckoning frames (same identity as
   relay_threats), newborns inherit the parent's frame, trees remembered by anyone become targets for everyone
   (`memory_shared`, `memory_shared_visited` params). Geometry unit-tested exact. Bench pending (see below).
-- Medical: baseline re-confirmed 0.706 offline; snap-tolerance / mode / pad sweeps running from the cached LLM replies.
+- Medical: baseline re-confirmed 0.706 offline. Sweeps from cached replies: snap tolerances (0.4/0.2 best), pad 0.15 → 0.688,
+  quote_pair 0.695, quote_seg 0.690, seg_sub_min 0.35/0.7 → 0.704/0.700. Boundaries are unbiased but noisy (exact boundaries
+  on the 133 picked questions would give tIoU 0.70); 62/195 miss the passage.
+  **Cross-encoder ensemble** (`pipeline._ce_ensemble`, fold models for the test): keep the LLM span if it overlaps one of the
+  CE's top-2 units, else take the CE unit (grown 0.5 z) when its margin ≥ 1.0 → held-out tIoU 0.526 → 0.556, **offline 0.724**.
+  Default on; `example.py` warms the CE. Not yet validated online.
 - Drone: `eval_recorded.py` scores a checkpoint on the 59 human-verified validation objects (38 frames of recording
   6262…; those frames were synth backgrounds → optimistic). Epoch-4 mix2 checkpoint: recall 0.95 @conf 0.1, ta-ta 0 FPs.
   `DRONE_CLASS_CONF` env adds per-class confidence thresholds.
