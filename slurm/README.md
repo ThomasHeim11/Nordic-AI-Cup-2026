@@ -11,6 +11,7 @@ Each job expects its code folder in `~` (`~/survival-simulator`, `~/drone-flyby`
 | score one PPO checkpoint | `sbatch ~/slurm/survival_eval_ckpt.sbatch rl/weights/ppo/iter_0050.pt` | `surv-eval-<id>.log` |
 | drone training (GPU) | `sbatch ~/slurm/drone_train.sbatch` | `drone-train-<id>.log` |
 | drone train on synth2 → eval chain (GPU) | `bash ~/slurm/drone_chain.sh` | `drone-mix2-<id>.log`, then `drone-eval-<id>.log` |
+| drone train → eval on an x86 GPU node (A100/H200/V100) | `bash ~/slurm/drone_chain_x86.sh hgx2q` | same logs; first run builds `.venv_x86` (~10 min) |
 | drone eval of given weights (GPU) | `sbatch ~/slurm/drone_eval.sbatch [weights]` | `drone-eval-<id>.log` |
 | drone serving + tunnel (GPU) | `sbatch ~/slurm/drone_serve.sbatch` | `drone-serve-<id>.log` (`grep TUNNEL`) |
 | medical eval with the big LLM (GPU) | `sbatch ~/slurm/medical_eval.sbatch` | `med-eval-<id>.log` |
