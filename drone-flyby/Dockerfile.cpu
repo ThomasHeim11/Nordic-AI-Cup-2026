@@ -1,0 +1,27 @@
+# Drone endpoint on a CPU-only cloud box (no GPU): the detector runs through ONNX Runtime.
+# Built from drone-flyby/:   docker build -f Dockerfile.cpu -t drone-cpu .
+# Run:                       docker run -d --restart unless-stopped --network host --name drone drone-cpu
+# Sizing (ONNX 544x960 input, fp32): t3.micro (2 old vCPU) ~340 ms/frame -- too slow;
+# c7i.2xlarge/4xlarge expected 60-120 ms/frame, comfortably inside the 333 ms frame clock.
+FROM python:3.11-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# CPU-only torch (ultralytics imports it even for ONNX inference), then the rest.
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir "ultralytics>=8.3,<9" onnxruntime "fastapi>=0.115" "uvicorn>=0.30" \
+       "pydantic>=2.7,<3" "numpy>=1.26" "opencv-python-headless>=4.9" "requests>=2.31"
+
+COPY dtos.py utils.py example.py api.py ./
+# models/ is tracked in git (weights/ and cache/ are not): the ONNX export + the fitted homography.
+COPY models/ models/
+
+ENV DRONE_WEIGHTS=models/mix2_final_best.onnx
+ENV OMP_NUM_THREADS=8
+EXPOSE 9053
+
+CMD ["python", "api.py"]

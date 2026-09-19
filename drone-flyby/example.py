@@ -57,10 +57,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 _H_DEFAULT = np.array([[1.006756, -0.001473, -12.614238],
                        [0.000337, 1.011899, 51.706644],
                        [0.0, -0.000001, 1.0]], dtype=np.float64)
-try:
-    MOTION_H = np.load(os.path.join(HERE, "cache", "homography.npy"))
-except Exception:
-    MOTION_H = _H_DEFAULT
+MOTION_H = _H_DEFAULT
+for _hp in (os.path.join(HERE, "cache", "homography.npy"), os.path.join(HERE, "models", "homography.npy")):
+    try:
+        MOTION_H = np.load(_hp)
+        break
+    except Exception:
+        continue
 
 
 def warp_point(x: float, y: float, H=None) -> Tuple[float, float]:
@@ -94,6 +97,7 @@ except Exception:
 _MIN_CONF = min([CONF_THRESHOLD] + list(CLASS_CONF.values()))
 NMS_IOU = 0.5
 IMGSZ = 960
+ONNX_IMGSZ = [544, 960]     # (h, w) of the fixed-shape ONNX export, see Dockerfile.cpu
 
 
 class Detector:
@@ -109,12 +113,18 @@ class Detector:
             from ultralytics import YOLO
             self.device = "mps" if torch.backends.mps.is_available() else (
                 "cuda" if torch.cuda.is_available() else "cpu")
-            self.model = YOLO(path)
+            self.imgsz = IMGSZ
+            if path.endswith((".onnx", ".xml")):
+                # ONNX Runtime / OpenVINO backends: CPU box, no torch device, and the
+                # export has a fixed input (544x960 = a 960x540 view letterboxed at 960).
+                self.device = "cpu"
+                self.imgsz = ONNX_IMGSZ
+            self.model = YOLO(path, task="detect")
             # Warm up: the first inference is by far the slowest.
             dummy = np.zeros((540, 960, 3), dtype=np.uint8)
             t0 = time.perf_counter()
             for _ in range(2):
-                self.model.predict(dummy, imgsz=IMGSZ, device=self.device, verbose=False)
+                self.model.predict(dummy, imgsz=self.imgsz, device=self.device, verbose=False)
             logger.info("loaded %s on %s (warm-up %.0f ms)", path, self.device,
                         1000 * (time.perf_counter() - t0))
         except Exception:
@@ -136,7 +146,7 @@ class Detector:
         return out
 
     def _run(self, image: np.ndarray):
-        results = self.model.predict(image, imgsz=IMGSZ, conf=_MIN_CONF, iou=NMS_IOU,
+        results = self.model.predict(image, imgsz=self.imgsz, conf=_MIN_CONF, iou=NMS_IOU,
                                      device=self.device, verbose=False, max_det=200)
         out = []
         for r in results:

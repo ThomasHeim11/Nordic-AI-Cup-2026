@@ -50,9 +50,21 @@ The branch servers are what is running on :9053/:9054 after `restart_from_branch
 - [x] Training done 16:00. Final epoch-20 checkpoint installed as `weights/best.pt`: Helsinki mAP 0.936 (old 0.903), recall
       0.93 on the verified validation objects, 107 real boxes / 1 ta-ta on the 183 recorded frames (epoch 4: 83 / 4).
 - [x] Drone server :9053 restarted from the branch with it (`.claude/worktrees/survival-fast-server/drone-flyby/api_9053.log`).
-- [ ] `drone_exp.log` (job tmp dir): conf 0.12 vs 0.05, flip TTA, ta-ta 0.5 on Helsinki → if one wins, set the env var
-      (`DRONE_CONF`, `DRONE_TTA=1`, `DRONE_CLASS_CONF='{"ta-ta":0.5}'`) and restart :9053.
-- [ ] `local_evaluator.py --realtime --url http://178.232.205.38:9053/...` (25/25 frames, < 250 ms) → **validate** → read the new recording.
+- [x] Inference settings measured: conf 0.05/0.12, flip TTA, ta-ta 0.5 all give the same Helsinki 0.936 (the tracker's own
+      thresholds dominate); TTA adds +2 % recall on the verified objects for +30 ms/frame → not worth it on a tight budget.
+- [!] **Hosting is the drone problem now.** Realtime evaluator run FROM AWS Stockholm against `http://178.232.205.38:9053`:
+      round trip 387 ms, 12/25 frames skipped, mAP 0.39 (loopback on the Mac: 123 ms, 0.84). The evaluator pushes a 1.4 MB
+      frame every 333 ms and the home link cannot take it: **the Mac is on 2.4 GHz 802.11n Wi-Fi** (RT-N12E is 2.4 GHz-only),
+      ~40–50 Mbit/s effective.
+      1. **Plug the Mac into the router by Ethernet** (100 Mbit LAN ports → ~2× the throughput, expected ~250 ms/frame). Then re-run
+         the Stockholm test: `ssh -i ~/Downloads/nordic.pem ubuntu@16.170.155.200` →
+         `cd ~/Nordic-AI-Cup-2026/drone-flyby && sudo docker run --rm --network host -v "$PWD":/w -w /w python:3.11-slim bash -c "pip install -q numpy opencv-python-headless requests pydantic 'faster-coco-eval>=1.7.2,<2'; python local_evaluator.py --realtime --url http://178.232.205.38:9053/predict"`
+      2. **AWS CPU box for the drone** (robust, no home link): launch in eu-north-1 an Ubuntu **c7i.2xlarge** (8 vCPU; c7i.4xlarge if
+         the quota allows 16), 30 GB disk, same key pair, security group TCP 22 + 9053. Then on it:
+         `git clone https://github.com/ThomasHeim11/Nordic-AI-Cup-2026.git && cd Nordic-AI-Cup-2026 && git checkout worktree-survival-fast-server && cd drone-flyby && sudo docker build -f Dockerfile.cpu -t drone-cpu . && sudo docker run -d --restart unless-stopped --network host --name drone drone-cpu`
+         (the ONNX weights are in the branch). Measured: ONNX 544×960 fp32 = 305 ms on the t3.micro's 2 old cores → expect
+         50–80 ms on a c7i.2xlarge, 25–40 ms on a 4xlarge; network Helsinki↔Stockholm ~30 ms. Free-plan credits, ~$9/day.
+- [ ] Whichever host passes 25/25 frames at < 250 ms in the Stockholm test → **validate** → read the new recording.
 - [ ] If still weak: another synth round with the new recording's objects (`mine_recordings.py` → `make_synth.py --mined`), overnight.
 
 ## 3 · Medical — from 0.698 to ≥ 0.85
