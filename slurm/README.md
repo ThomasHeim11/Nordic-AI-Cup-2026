@@ -10,6 +10,8 @@ Each job expects its code folder in `~` (`~/survival-simulator`, `~/drone-flyby`
 | survival RL: clone → score → PPO (GPU) | `sbatch ~/slurm/survival_rl.sbatch` | `surv-rl-<id>.log` (`grep -E "^\[|^iter"`) |
 | score one PPO checkpoint | `sbatch ~/slurm/survival_eval_ckpt.sbatch rl/weights/ppo/iter_0050.pt` | `surv-eval-<id>.log` |
 | drone training (GPU) | `sbatch ~/slurm/drone_train.sbatch` | `drone-train-<id>.log` |
+| drone train on synth2 → eval chain (GPU) | `bash ~/slurm/drone_chain.sh` | `drone-mix2-<id>.log`, then `drone-eval-<id>.log` |
+| drone eval of given weights (GPU) | `sbatch ~/slurm/drone_eval.sbatch [weights]` | `drone-eval-<id>.log` |
 | drone serving + tunnel (GPU) | `sbatch ~/slurm/drone_serve.sbatch` | `drone-serve-<id>.log` (`grep TUNNEL`) |
 | medical eval with the big LLM (GPU) | `sbatch ~/slurm/medical_eval.sbatch` | `med-eval-<id>.log` |
 
