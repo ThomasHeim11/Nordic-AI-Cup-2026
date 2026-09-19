@@ -50,6 +50,7 @@ _STATE_DEFAULTS = {
     "observations": [],
 }
 _IDLE = {"move_distance": 0.0, "move_direction": 0.0, "turn_angle": 0.0, "spawn_agent": False}
+_CONN = {"requests": 0, "ports": set()}
 _HEADERS = [(b"content-type", b"application/json")]
 
 
@@ -103,6 +104,13 @@ async def app(scope, receive, send):
         return
     method, path = scope["method"], scope["path"]
     if method == "POST" and path.rstrip("/") == "/predict":
+        # Diagnostic: does the evaluator reuse connections?  One log line per
+        # 2000 requests with the number of distinct client ports seen.
+        _CONN["requests"] += 1
+        _CONN["ports"].add(scope.get("client") or ("?", 0))
+        if _CONN["requests"] % 2000 == 0:
+            log.warning("predict: %d requests over %d connections", _CONN["requests"], len(_CONN["ports"]))
+            _CONN["ports"].clear()
         chunks = []
         while True:
             msg = await receive()
