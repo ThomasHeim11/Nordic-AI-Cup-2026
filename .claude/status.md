@@ -174,3 +174,10 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
 - Medical on cluster abandoned: qa_eval --transcribe-only did 2/39 conversations in 9 h (GPU idle). Serve Mac 7B (0.698).
 - Cluster GPU now reserved for drone: upload drone_synth2.tgz (scp -P 60441 ... dnat.simula.no), train from best_0903.pt on data/mix2.yaml.
 - Sat 19 Sep 10:27 CEST: survival validation with evolved genome via UPnP direct: 1006 (16 min wall, 600 s wait rule). Hosting still the ceiling.
+- Sat 19 Sep ~12:15: Render free tier (survival-3f1o.onrender.com, Frankfurt, 0.1 CPU) validated 569 (no bottleneck error, but slow + early deaths) -> kept only as emergency spare. Mac direct stays (1006). delayed_ack=0 set on Mac.
+- Cluster: n009 A40 froze training twice (GPU idle, py-spy in make_anchors); allocation died with ssh; A40s then taken by another user; n013 A100 "CUDA unknown error". All drone cluster jobs cancelled; everything trains/serves on the Mac. slurm/ has drone_train_mix2/drone_eval/drone_chain(_x86) for reference.
+- Plan: Mac drone run (runs/detect/runs/mix2_s, 20 ep, done ~15:30) -> check_recordings + eval_inprocess -> serve 9053 + UPnP -> validate; medical 9054 restart -> validate; Sunday evaluations ~14:00.
+- Sat 12:40: Mac mix2_s checkpoint (epoch ~4, Nordic-AI-Cup-2026/runs/detect/runs/mix2_s/weights/best.pt, copy weights/mix2_ep.pt)
+  on 183 recorded validation frames @conf0.3: jet 22, small_plane 20, hangar 14, small_tower 13, large_tower 7, tank 5, heli 2, ta-ta 4
+  (old 0.903 model: ta-ta 244 FPs, ~0 real objects). Helsinki pipeline 0.856 (old 0.903). Final pick after epoch 20 (~15:30).
+- Sat 12:58: AWS Stockholm survival endpoint http://16.170.155.200:9052 live (see deploy.md); validation queued (pos 6).

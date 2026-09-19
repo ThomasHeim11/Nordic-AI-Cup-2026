@@ -63,3 +63,12 @@ launcher scripts have a dead absolute path. `./.venv/bin/python` still works; in
       drone (333 ms/frame) and medical (60 s/conversation).
 - [ ] A validation attempt with the *same* build scored as expected.
 - [ ] Mac won't sleep: `caffeinate -dims &`.
+
+## Survival on AWS (Sat 19 Sep) — the latency fix
+- EC2 t3.micro, eu-north-1 (Stockholm), Ubuntu 26.04, public IP 16.170.155.200, security group opens TCP 22 + 9052.
+- Access: `ssh -i ~/Downloads/nordic.pem ubuntu@16.170.155.200`. Repo made public so the VM can `git clone`.
+- Server: root `Dockerfile` (survival agent only). Container `survival` runs with `--restart unless-stopped`, port 9052.
+- Update after a code/genome change:  ssh in, then
+  `cd ~/Nordic-AI-Cup-2026 && git pull -q && sudo docker build -q -t survival . && sudo docker rm -f survival && sudo docker run -d --restart unless-stopped -p 9052:9052 -e PORT=9052 --name survival survival && curl -s localhost:9052/`
+- Measured from Oslo: /predict 35 ms median (Mac at home: ~100 ms per tick from Helsinki). Free plan credits ($100); terminate the instance Sunday evening (EC2 → Instance state → Terminate).
+- Render (https://survival-3f1o.onrender.com) is a cold spare only (569).
