@@ -130,3 +130,6 @@ medical http://178.232.205.38:9054 -> 200 0.076349s
  0 TCP  9052->192.168.1.22:9052  'libminiupnpc' '' 0
  1 TCP  9053->192.168.1.22:9053  'libminiupnpc' '' 0
  2 TCP  9054->192.168.1.22:9054  'libminiupnpc' '' 0
+
+## Survival pass 2 (Sun 06:39)
+- Sun 06:39 survival pass 2 (12 seeds/genome): bench base 1079.3 vs evolved 1026.0 → kept gen19
