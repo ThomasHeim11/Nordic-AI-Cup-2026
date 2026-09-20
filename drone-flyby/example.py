@@ -487,6 +487,9 @@ DIVE_MAX_SIZE = 60.0       # source px; larger objects are fine at L1
 DIVE_MIN_CONF = 0.55
 DIVE_EVERY = int(os.environ.get("DRONE_DIVE_EVERY", "3"))
 DIVE_MARGIN = 80           # keep the predicted box this far inside the L2 crop
+# Dives only on tracks worth a frame: with a very low report threshold (AP is rank-based,
+# extra low boxes only add recall) junk tracks must not attract the camera.
+DIVE_MIN_TRACK_CONF = float(os.environ.get("DRONE_DIVE_MIN_TRACK_CONF", "0.08"))
 # Periodic full-frame look: every L0_EVERY frames (0 = never) spend one frame at L0 so
 # large classes (hangar, towers, launchers) anywhere in the 4K frame get seen and tracked.
 L0_EVERY = int(os.environ.get("DRONE_L0_EVERY", "0"))
@@ -607,7 +610,7 @@ def _choose_next_view(request: DroneFlybyPredictRequestDto, plan: CameraPlan,
         b2 = constraints.bounds_for_level(2)
         best, best_score = None, 0.0
         for t in tracker.tracks:
-            if t.best_level >= 2 or t.conf < REPORT_MIN_CONF:
+            if t.best_level >= 2 or t.conf < DIVE_MIN_TRACK_CONF:
                 continue
             small = max(t.w, t.h) <= DIVE_MAX_SIZE
             unsure = t.conf < DIVE_MIN_CONF
