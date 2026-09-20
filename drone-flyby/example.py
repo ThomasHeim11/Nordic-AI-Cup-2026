@@ -460,6 +460,7 @@ class CameraPlan:
     last_frame: int = -1
     last_dive_frame: int = -100
     last_l0_frame: int = -100
+    band_flipped: bool = False
     dive_target: Optional[int] = None   # id(track) being dived on
     # True camera state.  The request's view can be STALE: frames are emitted
     # on a clock and a frame rendered before our previous command was applied
@@ -495,7 +496,7 @@ DIVE_MIN_TRACK_CONF = float(os.environ.get("DRONE_DIVE_MIN_TRACK_CONF", "0.08"))
 L0_EVERY = int(os.environ.get("DRONE_L0_EVERY", "0"))
 MOTION_ONLINE_MIN = int(os.environ.get("DRONE_MOTION_ONLINE_MIN", "0"))   # >0: always use the online motion after this many accepted registrations
 SWEEP_FOLLOW_MOTION = os.environ.get("DRONE_SWEEP_FOLLOW", "1") == "1"   # mirror the band when the flight is reversed
-SWEEP_FLIP_PX = 5.0
+SWEEP_FLIP_PX = 20.0
 
 
 def choose_next_view(request: DroneFlybyPredictRequestDto, plan: CameraPlan,
@@ -645,8 +646,13 @@ def _choose_next_view(request: DroneFlybyPredictRequestDto, plan: CameraPlan,
     band_y = SWEEP_Y_BY_LEVEL.get(lvl, SWEEP_Y)
     if SWEEP_FOLLOW_MOTION and tracker is not None and getattr(tracker.motion, "accepted", 0) >= 3:
         _cx, _cy = warp_point(IMAGE_WIDTH / 2, IMAGE_HEIGHT / 2, tracker.motion.H)
-        if _cy - IMAGE_HEIGHT / 2 < -SWEEP_FLIP_PX:          # ground moves up -> objects enter at the bottom
-            band_y = IMAGE_HEIGHT - band_y
+        dy = _cy - IMAGE_HEIGHT / 2
+        if dy < -SWEEP_FLIP_PX:                               # ground moves clearly up -> objects enter at the bottom
+            plan.band_flipped = True
+        elif dy > SWEEP_FLIP_PX:                              # hysteresis: only unflip on clearly forward motion
+            plan.band_flipped = False
+    if plan.band_flipped:
+        band_y = IMAGE_HEIGHT - band_y
     if level != lvl:
         target = lvl if lvl in allowed else (max(a for a in allowed if a <= lvl) if any(a <= lvl for a in allowed) else min(allowed))
         p = clamp_to(target, *step_towards(cx, band_y, limit * 0.98))
