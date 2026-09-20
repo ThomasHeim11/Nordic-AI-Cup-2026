@@ -280,3 +280,6 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
 - Drone mix4 validated **0.1648** (prev 0.1612) → kept. Recording 5b57a0eb…: 249/249 frames received, levels L1 201 / L2 46,
   6.7 boxes/frame, jet_plane 715 of 1656 reports (many low-conf FPs). Ceiling is detection quality on this scene; no further change.
 - Survival/medical: no changes (variance-bound / no measurable gain in the time left). Evaluations to be queued ~13:00–13:30.
+- Sun 12:20: drone motion fix live on AWS (DRONE_MOTION_ONLINE_MIN=8 default in deploy_aws_cpu.sh). Out-of-view recall on recorded seq 0.457->0.519 (traj_eval.py), in-view 0.85->0.93, Helsinki 0.804->0.797.
+- Sun 12:01: drone thresholds 0.02/0.01 + dive floor 0.08 deployed (in-view mAP 0.875->0.884 on replay; Helsinki 0.793).
+- Sun 12:10: medical public smoke test OK (sample_4: 200 in 26.4 s, 10/10, 7 spans). Drone live = ab211b2 (motion fix, 0.02/0.01, dive floor, band hysteresis). Runbook in todo.md. No more Mac load until evaluations.
