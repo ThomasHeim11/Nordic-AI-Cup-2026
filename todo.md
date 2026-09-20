@@ -2,7 +2,17 @@
 
 ## Validated Sat 19 Sep evening: survival **1213** · drone **0.157** · medical **0.708** (all improved, all live)
 
-## SUNDAY MORNING — read this first (everything below is done and live; nothing needs Claude before you validate)
+## SUNDAY 09:40 — DRONE: NEW MODEL LIVE on `http://16.192.171.219:9053` → validate, then Evaluate before 16:00
+- In-domain labels: 360 objects on 143 recorded validation frames (Claude-verified: 58 small launchers, 13 jammers, 6 helicopters,
+  3 large launchers, 1 mine roller + auto-accepted planes/towers/hangars/tanks). Fine-tuned 4 epochs (mix4).
+- Held-out labelled frames mAP50: **0.909 vs 0.407** (old). On the 2nd recording @0.3: jets 105 (50), small launchers 43 (3),
+  large towers 53 (22), jammers 8 (4), helicopters 6 (3), large launchers 3 (0), mine rollers 2 (0). Helsinki 0.79 (was 0.936; irrelevant).
+- **If the drone validation is below 0.161**, roll back to the previous model (2 min) and validate again:
+  `ssh -i ~/Downloads/nordic.pem ubuntu@16.192.171.219 'cd ~/Nordic-AI-Cup-2026/drone-flyby && git checkout 165eb42~1 -- models/ && bash deploy_aws_cpu.sh'`
+- Incident 09:15: the Mac disk filled (14 GB swap + 8 GB Docker image) → a broken commit went live for ~4 minutes with no
+  detector; restored, disk freed (Docker.raw deleted), re-exported, redeployed 09:38.
+
+## SUNDAY MORNING — earlier brief
 **What happened overnight (details at the bottom under "Overnight results")**
 - Drone: the synth3 fine-tune did NOT find the five missing classes and lost towers/tanks → **current model kept**.
   Thresholds loosened on the box (conf 0.08 / report 0.05) for more recall on the near-zero classes.

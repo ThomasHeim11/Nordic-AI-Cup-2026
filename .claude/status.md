@@ -240,6 +240,22 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
   night → `survival-simulator/evo_mac_a.json` (worktree); bench any candidate on 24 maps vs base before deploying.
 - **Sat 20:33 drone fine-tune `mix3_s` started** (Helsinki + synth2 + synth3, 12 epochs, from mix2_final_best; run dir
   `Nordic-AI-Cup-2026/runs/detect/runs/mix3_s`, ~25 min/epoch once the CPU is free). Medical server stopped for memory.
+## Sun 20 Sep, morning
+- Validations 08:00–08:25 (same builds as last night): drone **0.161** ×2 (looser thresholds kept), survival 869 then **1599**
+  (same genome; single-game variance), medical validation ran (19 conversations, 20–38 s) — score on the site.
+- **Drone in-domain labelling by Claude** (08:05–08:25): candidates mined from both recordings with two detectors at conf 0.05,
+  reviewed on 240-px contact sheets. Real objects on this terrain: 3 small launchers on a sandy lot (both recordings), a
+  helicopter at the water edge, a jammer beside solar-roof houses, a tracked launcher on grass, one mine roller. All ta-ta
+  candidates were roofs/cars. Label set `cache/mined_objects_v3.json`: 360 objects / 143 frames (161 auto @≥0.5 proven
+  classes, 76 manual, 64 same-frame completions, 59 from yesterday). Real frames → `data/real` (125 train / 18 val).
+- `mix4_s`: Helsinki + synth4 (3000, objects pasted from the in-domain cutouts) + real frames ×3, 4 epochs (stopped early:
+  swap full). Held-out real frames mAP50 **0.909 vs 0.407**; 2nd recording @0.3: small_launcher 43 (3), large_launcher 3 (0),
+  mine_roller 2 (0), jammer 8 (4), helicopter 6 (3), jets 105 (50); Helsinki .pt 0.804 / OpenVINO 0.790 (was 0.936).
+- **Incident 09:15**: the Mac disk hit 0 bytes free (swap 14 GB + Docker.raw 8 GB) → truncated checkpoint copy, failed export,
+  a commit deleting `models/` went live → drone box ran ~4 min with "detector disabled". Restored from the previous commit,
+  deleted Docker.raw + synth3 (8.7 GB free), re-exported, redeployed 09:38: Stockholm 119 ms/frame, Helsinki over HTTP 0.842.
+  Rollback command in todo.md.
+
 ## Sun 20 Sep, night (automatic chain `overnight_chain.sh`)
 - Drone `mix3_s` (Helsinki + synth2 + synth3, 12 epochs, val mAP50 0.839 vs 0.825): on the two validation recordings it still
   reports 0 large_launcher / medium_launcher / medium_plane / condor (1 mine_roller @0.15) and finds fewer towers (10 vs 22)
