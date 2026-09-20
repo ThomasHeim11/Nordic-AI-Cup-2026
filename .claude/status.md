@@ -283,3 +283,8 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
 - Sun 12:20: drone motion fix live on AWS (DRONE_MOTION_ONLINE_MIN=8 default in deploy_aws_cpu.sh). Out-of-view recall on recorded seq 0.457->0.519 (traj_eval.py), in-view 0.85->0.93, Helsinki 0.804->0.797.
 - Sun 12:01: drone thresholds 0.02/0.01 + dive floor 0.08 deployed (in-view mAP 0.875->0.884 on replay; Helsinki 0.793).
 - Sun 12:10: medical public smoke test OK (sample_4: 200 in 26.4 s, 10/10, 7 spans). Drone live = ab211b2 (motion fix, 0.02/0.01, dive floor, band hysteresis). Runbook in todo.md. No more Mac load until evaluations.
+
+## Sun 20 Sep — FINAL EVALUATIONS (all queued before the 16:00 deadline)
+- Drone: validated 0.2415 (13:10 UTC, build ab211b2) → **evaluation 0.0564** (hidden scene differs from validation).
+- Medical: validation 0.7083 → **evaluation 0.7160** (Mac 7B + CE ensemble, 0 errors).
+- Survival: evaluation queued 13:33 UTC at position 38 (AWS Stockholm, gen19 genome; validations 1213 / 1599). Result pending.
