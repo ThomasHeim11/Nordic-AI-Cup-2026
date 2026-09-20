@@ -288,3 +288,4 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
 - Drone: validated 0.2415 (13:10 UTC, build ab211b2) → **evaluation 0.0564** (hidden scene differs from validation).
 - Medical: validation 0.7083 → **evaluation 0.7160** (Mac 7B + CE ensemble, 0 errors).
 - Survival: evaluation queued 13:33 UTC at position 38 (AWS Stockholm, gen19 genome; validations 1213 / 1599). Result pending.
+- **FINAL (Sun 20 Sep evening): 10th overall, 13.60 points.** Survival evaluation 1098.2 → 4th place (12.00 pts); drone 0.056 (0.90); medical 0.716 (0.70).
