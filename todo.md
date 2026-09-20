@@ -1,6 +1,28 @@
 # TODO — Nordic AI Cup 2026 — target: 1st in all three
 
-## Validated Sat 19 Sep evening: survival **1213** · drone **0.157** · medical **0.708** (all improved, all live)
+## SUNDAY 14:50 RUNBOOK (deadline 16:00 — evaluations must be queued, and survival takes ~75 min)
+
+**Press in this order, no gaps:**
+1. **Survival — Queue EVALUATION immediately** (`http://16.170.155.200:9052`, last validations 1213 / 1599). It runs ~75 min, so
+   pressing at 14:50 finishes ~16:05; if you can press it earlier from your phone, do (validation not needed — nothing changed since 1599).
+2. **Medical — Queue EVALUATION** (`http://178.232.205.38:9054`, server restarted 11:15, answers publicly; ~20 min). Nothing changed since 0.708.
+3. **Drone — validate first, then evaluate** (`http://16.192.171.219:9053`, 2 min each):
+   a. Queue validation on the live build (motion fix + thresholds 0.02/0.01; see below). Note the score = **X**.
+   b. If X ≥ 0.165 → **Queue evaluation**. If X < 0.161 → roll back (Mac terminal, 1 min) and evaluate the old build:
+      `ssh -i ~/Downloads/nordic.pem ubuntu@16.192.171.219 'cd ~/Nordic-AI-Cup-2026/drone-flyby && DRONE_MOTION_ONLINE_MIN=0 DRONE_CONF=0.08 DRONE_REPORT_MIN_CONF=0.05 bash deploy_aws_cpu.sh'`
+   c. Only if there is time (>15 min before you must evaluate): one extra variant, full-frame look every 6 frames —
+      `ssh -i ~/Downloads/nordic.pem ubuntu@16.192.171.219 'cd ~/Nordic-AI-Cup-2026/drone-flyby && DRONE_L0_EVERY=6 bash deploy_aws_cpu.sh'` → validate → keep the better → evaluate.
+      (Your 11:30 validation of "variant B" was L0_EVERY=6 *without* the motion fix — compare it with 0.165, not with X.)
+4. After all three evaluations are done: terminate both EC2 instances; merge this branch into main (`rm todo.md` in the main checkout first).
+
+**What changed on the drone box since your 09:24 validation (0.1648), all measured offline on the recorded validation sequence:**
+- Tracker now trusts the *measured* motion after 8 accepted registrations (it used to flip back to the Helsinki prior, ~6 px/frame wrong):
+  out-of-view recall on remembered objects 0.457 → 0.519, in-view recall 0.85 → 0.93 (traj_eval.py / replay_eval.py). Helsinki 0.804 → 0.797.
+- Detect/report thresholds 0.08/0.05 → 0.02/0.01 (rank-based AP: extra low boxes only add recall): in-view mAP 0.875 → 0.884, held-out split 0.89 → 0.95.
+  Dives keep a 0.08 track-confidence floor so junk tracks do not steer the camera.
+- Sweep band mirrors to the bottom if the flight direction is reversed (hysteresis, 20 px). A reversed-flight Helsinki test scored 0.15 vs 0.80
+  forward when the prior was trusted — the evaluation "may fly differently", so this is insurance.
+- Verified on the live box: full 249-frame replay OK, tracks bounded (≤ 37), ~16 boxes/frame, no errors.
 
 ## SUNDAY 09:40 — DRONE: NEW MODEL LIVE on `http://16.192.171.219:9053` → validate, then Evaluate before 16:00
 - In-domain labels: 360 objects on 143 recorded validation frames (Claude-verified: 58 small launchers, 13 jammers, 6 helicopters,
