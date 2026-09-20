@@ -18,13 +18,13 @@ from utils import frame_numbers, global_bbox_to_source, load_frame
 import local_evaluator as le
 
 
-def run(scene="helsinki", overrides=None, use_cache=True, verbose=False):
+def run(scene="helsinki", overrides=None, use_cache=True, verbose=False, reverse=False):
     import example
     for k, v in (overrides or {}).items():
         setattr(example, k, v)
     example._SEQ.clear()
 
-    cache_path = os.path.join(HERE, "cache", f"dets_{scene}.json")
+    cache_path = os.path.join(HERE, "cache", f"dets_{scene}{'_rev' if reverse else ''}.json")
     cache = {}
     if use_cache and os.path.exists(cache_path):
         with open(cache_path) as f:
@@ -48,6 +48,8 @@ def run(scene="helsinki", overrides=None, use_cache=True, verbose=False):
     example.DETECTOR = cd
 
     frames = frame_numbers(scene)
+    if reverse:                      # play the flight backwards: objects enter from the bottom
+        frames = list(reversed(frames))
     camera = le.Camera()
     feedback = None
     predictions = {}
@@ -127,12 +129,13 @@ def main():
     ap.add_argument("--set", action="append", default=[], metavar="NAME=PYEXPR")
     ap.add_argument("--no-cache", action="store_true")
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--reverse", action="store_true", help="reversed flight direction (robustness test)")
     a = ap.parse_args()
     overrides = {}
     for kv in a.set:
         k, v = kv.split("=", 1)
         overrides[k] = eval(v)
-    mAP, per_class, stats, t_pred = run(a.scene, overrides, not a.no_cache, a.verbose)
+    mAP, per_class, stats, t_pred = run(a.scene, overrides, not a.no_cache, a.verbose, a.reverse)
     for k, v in sorted(per_class.items(), key=lambda kv: -kv[1]):
         print(f"  {k:16s} {v:.3f}")
     print(f"invalid {stats.invalid_responses} | moves applied {stats.commands_applied} refused {stats.invalid_commands} "

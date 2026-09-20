@@ -20,6 +20,7 @@ sudo docker run -d --restart unless-stopped --network host -e DRONE_WEIGHTS="$WE
   -e DRONE_CONF="${DRONE_CONF:-0.08}" -e DRONE_REPORT_MIN_CONF="${DRONE_REPORT_MIN_CONF:-0.05}" \
   -e DRONE_L0_EVERY="${DRONE_L0_EVERY:-0}" -e DRONE_DIVE_EVERY="${DRONE_DIVE_EVERY:-3}" -e DRONE_SWEEP_LEVEL="${DRONE_SWEEP_LEVEL:-1}" \
   -e DRONE_MISS_DECAY_L1="${DRONE_MISS_DECAY_L1:-0.85}" \
+  -e DRONE_MOTION_ONLINE_MIN="${DRONE_MOTION_ONLINE_MIN:-8}" -e DRONE_DISAGREE_PX="${DRONE_DISAGREE_PX:-10}" -e DRONE_SWEEP_FOLLOW="${DRONE_SWEEP_FOLLOW:-1}" \
   -v "$HOME/drone_recordings:/app/recordings" --name drone drone-cpu >/dev/null
 for i in $(seq 1 30); do sleep 5; c=$(curl -s -m 3 -o /dev/null -w "%{http_code}" localhost:9053/api || true); [ "$c" = 200 ] && break; done
 echo "drone endpoint: http://$(curl -s -m 5 http://checkip.amazonaws.com):9053  (health $c after $((i*5))s, weights $WEIGHTS)"

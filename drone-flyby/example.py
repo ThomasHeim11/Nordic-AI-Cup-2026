@@ -210,7 +210,7 @@ class MotionEstimator:
     # Switch from the prior to the online estimate only when they disagree by
     # more than this at the frame centre (px/frame) or in scale; on a scene the
     # prior was fitted for, the prior is exact and the estimate is only noise.
-    DISAGREE_PX = 10.0
+    DISAGREE_PX = float(os.environ.get("DRONE_DISAGREE_PX", "10.0"))
     DISAGREE_SCALE = 0.006
 
     def __init__(self, prior):
@@ -229,6 +229,8 @@ class MotionEstimator:
         shift = float(np.hypot(dp[0] - do[0], dp[1] - do[1]))
         scale = float(max(abs(self.prior[0, 0] - self.online[0, 0]), abs(self.prior[1, 1] - self.online[1, 1])))
         want_online = self.accepted >= 2 and (shift > self.DISAGREE_PX or scale > self.DISAGREE_SCALE)
+        if MOTION_ONLINE_MIN and self.accepted >= MOTION_ONLINE_MIN:
+            want_online = True                # enough agreeing registrations: trust the measurement over the prior
         if want_online != self.using_online:
             logger.info("motion model: %s (disagreement %.1f px, scale %.4f)",
                         "ONLINE estimate" if want_online else "fitted prior", shift, scale)
@@ -488,6 +490,9 @@ DIVE_MARGIN = 80           # keep the predicted box this far inside the L2 crop
 # Periodic full-frame look: every L0_EVERY frames (0 = never) spend one frame at L0 so
 # large classes (hangar, towers, launchers) anywhere in the 4K frame get seen and tracked.
 L0_EVERY = int(os.environ.get("DRONE_L0_EVERY", "0"))
+MOTION_ONLINE_MIN = int(os.environ.get("DRONE_MOTION_ONLINE_MIN", "0"))   # >0: always use the online motion after this many accepted registrations
+SWEEP_FOLLOW_MOTION = os.environ.get("DRONE_SWEEP_FOLLOW", "1") == "1"   # mirror the band when the flight is reversed
+SWEEP_FLIP_PX = 5.0
 
 
 def choose_next_view(request: DroneFlybyPredictRequestDto, plan: CameraPlan,
@@ -629,9 +634,16 @@ def _choose_next_view(request: DroneFlybyPredictRequestDto, plan: CameraPlan,
             plan.last_dive_frame = request.frame
             return RequestedViewDto(resolution_level=2, center_x=best[0], center_y=best[1])
 
-    # sweep phase: patrol the top band, zig-zagging in x by the max step.
+    # sweep phase: patrol the entry band, zig-zagging in x by the max step.
+    # The band follows the flight direction: objects enter where the ground
+    # motion comes from (top for the Helsinki-like southward flight, bottom if
+    # the evaluation drone flies the other way).
     lvl = SWEEP_LEVEL
     band_y = SWEEP_Y_BY_LEVEL.get(lvl, SWEEP_Y)
+    if SWEEP_FOLLOW_MOTION and tracker is not None and getattr(tracker.motion, "accepted", 0) >= 3:
+        _cx, _cy = warp_point(IMAGE_WIDTH / 2, IMAGE_HEIGHT / 2, tracker.motion.H)
+        if _cy - IMAGE_HEIGHT / 2 < -SWEEP_FLIP_PX:          # ground moves up -> objects enter at the bottom
+            band_y = IMAGE_HEIGHT - band_y
     if level != lvl:
         target = lvl if lvl in allowed else (max(a for a in allowed if a <= lvl) if any(a <= lvl for a in allowed) else min(allowed))
         p = clamp_to(target, *step_towards(cx, band_y, limit * 0.98))
