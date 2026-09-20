@@ -273,3 +273,10 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
 - Drone: `eval_recorded.py` scores a checkpoint on the 59 human-verified validation objects (38 frames of recording
   6262…; those frames were synth backgrounds → optimistic). Epoch-4 mix2 checkpoint: recall 0.95 @conf 0.1, ta-ta 0 FPs.
   `DRONE_CLASS_CONF` env adds per-class confidence thresholds.
+
+## Sun 20 Sep 11:50 — final pre-evaluation state
+- VS Code quit at ~11:00 (Mac out of memory) killed the Mac servers; medical restarted 11:15 from this branch (public 200).
+  Survival (AWS 16.170.155.200:9052) and drone (AWS 16.192.171.219:9053, mix4 OpenVINO) were unaffected.
+- Drone mix4 validated **0.1648** (prev 0.1612) → kept. Recording 5b57a0eb…: 249/249 frames received, levels L1 201 / L2 46,
+  6.7 boxes/frame, jet_plane 715 of 1656 reports (many low-conf FPs). Ceiling is detection quality on this scene; no further change.
+- Survival/medical: no changes (variance-bound / no measurable gain in the time left). Evaluations to be queued ~13:00–13:30.
