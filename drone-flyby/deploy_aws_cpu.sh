@@ -17,6 +17,7 @@ cd drone-flyby
 sudo docker build -q -f Dockerfile.cpu -t drone-cpu . | tail -1
 sudo docker rm -f drone >/dev/null 2>&1 || true
 sudo docker run -d --restart unless-stopped --network host -e DRONE_WEIGHTS="$WEIGHTS" -e DRONE_RECORD_DIR=/app/recordings \
+  -e DRONE_CONF="${DRONE_CONF:-0.08}" -e DRONE_REPORT_MIN_CONF="${DRONE_REPORT_MIN_CONF:-0.05}" \
   -v "$HOME/drone_recordings:/app/recordings" --name drone drone-cpu >/dev/null
 for i in $(seq 1 30); do sleep 5; c=$(curl -s -m 3 -o /dev/null -w "%{http_code}" localhost:9053/api || true); [ "$c" = 200 ] && break; done
 echo "drone endpoint: http://$(curl -s -m 5 http://checkip.amazonaws.com):9053  (health $c after $((i*5))s, weights $WEIGHTS)"

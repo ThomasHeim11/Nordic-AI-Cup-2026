@@ -325,7 +325,7 @@ MATCH_IOU = 0.25
 MATCH_DIST_FRAC = 0.9                         # or centre within this * max(w,h)
 MISS_DECAY = {0: 0.97, 1: 0.85, 2: 0.6}       # conf decay when in view but not detected
 OFFVIEW_DECAY = 0.995
-REPORT_MIN_CONF = 0.08
+REPORT_MIN_CONF = float(os.environ.get("DRONE_REPORT_MIN_CONF", "0.08"))   # AP is rank-based: low boxes only add recall
 DUPLICATE_IOU = 0.55
 
 
