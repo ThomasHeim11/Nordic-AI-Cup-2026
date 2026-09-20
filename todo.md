@@ -6,8 +6,8 @@
 **What happened overnight (details at the bottom under "Overnight results")**
 - Drone: the synth3 fine-tune did NOT find the five missing classes and lost towers/tanks → **current model kept**.
   Thresholds loosened on the box (conf 0.08 / report 0.05) for more recall on the near-zero classes.
-- Survival: evolver pass 1 → 971 vs 950 on 24 maps (noise) → **gen19 kept**. Pass 2 (12 seeds/genome) runs until 06:30,
-  then benches itself and copies a genome to the box only if it wins by > 40 (the server reloads it at the next simulation).
+- Survival: evolver pass 1 → 971 vs 950 on 24 maps (noise) → **gen19 kept**. Pass 2 (12 seeds/genome, 8 gens) → 1026 vs 1079
+  → **gen19 kept**. The live container still runs the genome that validated 1213.
 - Medical: three selection variants all ≤ 0.724 offline → **validated build kept**, server restarted warm at 02:18.
 - Health at 02:18: survival 200 · drone 200 · medical 200; UPnP 9052/9053/9054 present.
 
