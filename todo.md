@@ -133,3 +133,10 @@ medical http://178.232.205.38:9054 -> 200 0.076349s
 
 ## Survival pass 2 (Sun 06:39)
 - Sun 06:39 survival pass 2 (12 seeds/genome): bench base 1079.3 vs evolved 1026.0 → kept gen19
+
+- rec2 @0.3 current: per class: [('jet_plane', 50), ('small_plane', 42), ('small_tower', 22), ('large_tower', 22), ('hangar', 20), ('ta-ta', 7), ('tank', 5), ('jammer', 4), ('helicopter', 3), ('small_launcher', 3), ('spacecraft', 1)]
+- rec2 @0.3 mix4: per class: [('jet_plane', 105), ('large_tower', 53), ('small_plane', 46), ('small_launcher', 43), ('small_tower', 27), ('hangar', 20), ('jammer', 8), ('helicopter', 6), ('large_launcher', 3), ('mine_roller', 2), ('tank', 1), ('ta-ta', 1)]
+ERROR: Could not install packages due to an OSError: [Errno 28] No space left on device
+
+
+- mix4 DEPLOYED on 16.192.171.219 (validate it on the site; fallback = redeploy with the previous models/ from git)
