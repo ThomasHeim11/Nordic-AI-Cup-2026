@@ -115,3 +115,22 @@ The branch servers are what is running on :9053/:9054 after `restart_from_branch
 - [ ] 12:00–13:30 validate all three on the final URLs — identical builds.
 - [ ] ~14:00 **Evaluate** ×3 (survival = 3 sims; keep everything up).
 - [ ] Top-5 ⇒ submit training code + models by 20:00. Terminate EC2.
+
+## Overnight results (auto, Sun 20 Sep 02:18)
+- Sun 01:48 drone training: 12 0.83911 (epoch, val mAP50)
+- Sun 01:53 drone AI-Cup: real-class boxes / ta-ta / Helsinki mAP / verified recall = 238 5 0.8472 0.93 (current: 278 8 0.9363 0.93)
+- Sun 01:56 drone AI-Cup: real-class boxes / ta-ta / Helsinki mAP / verified recall = 238 5 0.8472 0.93 (current: 278 8 0.9363 0.93)
+- Sun 01:56 drone: kept the current model (no checkpoint beat it on the recordings)
+- Sun 02:15 drone: mix3 (synth3 fine-tune, val mAP50 0.839) finds NO new classes on the validation recordings (0 launchers / condor / medium_plane, 1 mine_roller @0.15) and loses towers + tanks → current mix2 model stays. Thresholds loosened on the box: DRONE_CONF 0.08, DRONE_REPORT_MIN_CONF 0.05 (Helsinki over HTTP 0.916 vs 0.936; rank-based AP → more recall on the near-zero classes of the validation scene). **Fallback if the morning validation is below 0.157**: `ssh -i ~/Downloads/nordic.pem ubuntu@16.192.171.219 'cd ~/Nordic-AI-Cup-2026/drone-flyby && DRONE_CONF=0.12 DRONE_REPORT_MIN_CONF=0.08 bash deploy_aws_cpu.sh'` then validate again (2 min).
+- Sun 02:10 survival bench (24 maps): base 950.2 vs evolver-best 971.1
+- Sun 02:10 survival: kept the gen19 genome
+- Sun 02:17 medical offline (39 convs): base 0.724 | +CE candidates 0.713 | +lexical vote 0.724 | both 0.716
+- Sun 02:17 medical: serving variant = base (0.724)
+sample_6: 27.6s round trip | keys ['answers', 'evidence_start', 'evidence_end']
+accuracy 1.00 | tIoU 0.851 over 7 yes-questions
+survival http://16.170.155.200:9052 -> 200 0.034109s
+drone http://16.192.171.219:9053 -> 200 0.031658s
+medical http://178.232.205.38:9054 -> 200 0.076349s
+ 0 TCP  9052->192.168.1.22:9052  'libminiupnpc' '' 0
+ 1 TCP  9053->192.168.1.22:9053  'libminiupnpc' '' 0
+ 2 TCP  9054->192.168.1.22:9054  'libminiupnpc' '' 0
