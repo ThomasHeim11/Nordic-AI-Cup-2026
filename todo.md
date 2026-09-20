@@ -2,27 +2,23 @@
 
 ## Validated Sat 19 Sep evening: survival **1213** · drone **0.157** · medical **0.708** (all improved, all live)
 
-## Overnight (Sat → Sun), running unattended — do not touch the Mac
-- **Drone**: `train_mix3.sh` (job tmp dir, log `train_mix3.log`) generates `data/synth3` (4000 images on tonight's validation
-  backgrounds: 90 object-free frames + 31 frames with 47 high-confidence pseudo-labels; all 16 Helsinki classes pasted, so the
-  five never-detected classes get seen on this terrain), **stops the medical server to free memory**, then fine-tunes
-  `mix2_final_best.pt` for 12 epochs (`runs/.../mix3_s`, ~4–5 h).
-- **Survival**: `ab_round1.sh` benches on 24 maps: base vs wander_jitter 0.05, late_pop 10 / late_t1 2000, crowd_limit_late 2
-  (`$CLAUDE_JOB_DIR/tmp/ab_*.log`, one summary line each starting with `[`).
-- Drone server on AWS and survival on AWS stay live; the Mac serves nothing overnight.
+## SUNDAY MORNING — read this first (everything below is done and live; nothing needs Claude before you validate)
+**What happened overnight (details at the bottom under "Overnight results")**
+- Drone: the synth3 fine-tune did NOT find the five missing classes and lost towers/tanks → **current model kept**.
+  Thresholds loosened on the box (conf 0.08 / report 0.05) for more recall on the near-zero classes.
+- Survival: evolver pass 1 → 971 vs 950 on 24 maps (noise) → **gen19 kept**. Pass 2 (12 seeds/genome) runs until 06:30,
+  then benches itself and copies a genome to the box only if it wins by > 40 (the server reloads it at the next simulation).
+- Medical: three selection variants all ≤ 0.724 offline → **validated build kept**, server restarted warm at 02:18.
+- Health at 02:18: survival 200 · drone 200 · medical 200; UPnP 9052/9053/9054 present.
 
-## Sunday morning procedure (Claude does the steps marked C when you say "go"; the rest is yours)
-1. (C) Score mix3_s best/last: `eval_recorded.py` (59 verified objects), `check_recordings.py` on both recordings, Helsinki
-   `eval_inprocess.py`. Keep it only if it beats mix2 on the recordings without losing Helsinki.
-2. (C) If kept: export OpenVINO fp32 at 544×960 → `models/`, commit, push, redeploy on the drone box
-   (`ssh ... 16.192.171.219 'cd ~/Nordic-AI-Cup-2026/drone-flyby && git pull -q && bash deploy_aws_cpu.sh'`), Stockholm test.
-3. (C) Survival: pick the A/B winner(s), bench the combination once more vs base, write the genome, push, redeploy the
-   survival container (`git pull && docker build -t survival:fast . && docker rm -f survival && docker run ... survival:fast`).
-4. (C) Restart the medical server on the Mac: `cd .claude/worktrees/survival-fast-server/medical-appointment && nohup ./.venv/bin/python api.py > api_9054.log 2>&1 &` (2 min warm-up), `upnpc -l` shows 9054.
-5. (you) Validate all three on the final URLs: survival `http://16.170.155.200:9052`, drone `http://16.192.171.219:9053`,
-   medical `http://178.232.205.38:9054`. Nothing heavy on the Mac during medical.
-6. (you) ~14:00 **Evaluate** ×3. Survival = 3 sims ≈ 25 min wall; keep everything up.
-7. (you) After the results: terminate both EC2 instances; merge the branch (`rm todo.md` in the main checkout first).
+**Your steps (≈ 08:00 → 10:30)**
+1. Validate all three (they can run at the same time, different hosts):
+   survival `http://16.170.155.200:9052` (25 min) · drone `http://16.192.171.219:9053` (2 min) · medical `http://178.232.205.38:9054` (10 min).
+   Nothing heavy on the Mac while medical runs.
+2. Drone only: if the validation is **below 0.157**, revert the thresholds and validate again (2 min):
+   `ssh -i ~/Downloads/nordic.pem ubuntu@16.192.171.219 'cd ~/Nordic-AI-Cup-2026/drone-flyby && DRONE_CONF=0.12 DRONE_REPORT_MIN_CONF=0.08 bash deploy_aws_cpu.sh'`
+3. By 09:00 press **Evaluate** on all three (survival ≈ 75 min for 3 sims, medical ≈ 20 min, drone ≈ 3 min). Keep everything up.
+4. Afterwards: terminate both EC2 instances (survival + drone); merge the branch (`rm todo.md` in the main checkout first).
 Deadline Sun 20 Sep 16:00 CEST · evaluations Sun ~14:00 · one Evaluate per challenge, ever.
 Rank points: 1st 25 · 2nd 18 · 3rd 15 · 4th 12 · 5th 10. 1st on all three = 75.
 **Cluster abandoned (Sat 19 Sep): everything trains locally on the Mac; survival serves from AWS.**

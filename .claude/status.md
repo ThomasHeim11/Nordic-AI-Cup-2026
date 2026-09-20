@@ -240,6 +240,20 @@ Leaderboard calibration (validation, 18 Sep 21:00): we are rank 53 / 93, 1.40 po
   night → `survival-simulator/evo_mac_a.json` (worktree); bench any candidate on 24 maps vs base before deploying.
 - **Sat 20:33 drone fine-tune `mix3_s` started** (Helsinki + synth2 + synth3, 12 epochs, from mix2_final_best; run dir
   `Nordic-AI-Cup-2026/runs/detect/runs/mix3_s`, ~25 min/epoch once the CPU is free). Medical server stopped for memory.
+## Sun 20 Sep, night (automatic chain `overnight_chain.sh`)
+- Drone `mix3_s` (Helsinki + synth2 + synth3, 12 epochs, val mAP50 0.839 vs 0.825): on the two validation recordings it still
+  reports 0 large_launcher / medium_launcher / medium_plane / condor (1 mine_roller @0.15) and finds fewer towers (10 vs 22)
+  and tanks (1 vs 5); Helsinki 0.847. **Kept mix2_final_best.** Copy-paste synthesis on this terrain does not unlock the rare
+  classes; they are probably not visible in the frames the camera policy chooses, or look unlike the Helsinki crops.
+- Drone thresholds: in-process Helsinki 0.05/0.03 → 0.916, 0.08/0.05 → 0.936, default 0.12/0.08 → 0.936; over HTTP with the
+  OpenVINO box 0.08/0.05 → 0.916. Deployed 0.08/0.05 anyway (rank-based AP; the validation scene's weak classes need recall);
+  fallback command in todo.md.
+- Survival evolver pass 1 (6 seeds/genome, 12 gens): best 6-seed mean 1332, but 24-map bench 971 vs base 950 → kept gen19.
+  The live container is `survival:fast2` with the genome bind-mounted (`~/genome/hivemind_params.json`, reloaded at every new
+  simulation) so a better genome is a file copy, no redeploy. Pass 2 (12 seeds/genome) runs until 06:30 with auto-bench/deploy.
+- Medical: base 0.724 | +CE candidates in the re-rank 0.713 | +lexical vote 0.724 | both 0.716 → validated build kept; server
+  restarted warm (sample_6 in 27.6 s over HTTP).
+- t3.micro disk hit 96 % (old images) → pruned to 968 MB free.
 - Drone: `eval_recorded.py` scores a checkpoint on the 59 human-verified validation objects (38 frames of recording
   6262…; those frames were synth backgrounds → optimistic). Epoch-4 mix2 checkpoint: recall 0.95 @conf 0.1, ta-ta 0 FPs.
   `DRONE_CLASS_CONF` env adds per-class confidence thresholds.
