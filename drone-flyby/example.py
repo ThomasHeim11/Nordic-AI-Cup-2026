@@ -457,6 +457,7 @@ class CameraPlan:
     sweep_dir: int = 1
     last_frame: int = -1
     last_dive_frame: int = -100
+    last_l0_frame: int = -100
     dive_target: Optional[int] = None   # id(track) being dived on
     # True camera state.  The request's view can be STALE: frames are emitted
     # on a clock and a frame rendered before our previous command was applied
@@ -473,7 +474,7 @@ class CameraPlan:
 # Level-1 tiles that cover the whole frame (centres), visited once at the start.
 L1_TILES = [(960, 540), (2880, 540), (2880, 1620), (960, 1620)]
 # Sweep band: objects enter at the top, so patrol y = SWEEP_Y at SWEEP_LEVEL.
-SWEEP_LEVEL = 1
+SWEEP_LEVEL = int(os.environ.get("DRONE_SWEEP_LEVEL", "1"))
 SWEEP_Y = 300
 SWEEP_Y_BY_LEVEL = {1: 540, 2: 300}
 # L2 dives: re-inspect a track at native resolution if it was only seen coarsely
@@ -482,8 +483,11 @@ SWEEP_Y_BY_LEVEL = {1: 540, 2: 300}
 DIVE_ENABLED = True
 DIVE_MAX_SIZE = 60.0       # source px; larger objects are fine at L1
 DIVE_MIN_CONF = 0.55
-DIVE_EVERY = 3
+DIVE_EVERY = int(os.environ.get("DRONE_DIVE_EVERY", "3"))
 DIVE_MARGIN = 80           # keep the predicted box this far inside the L2 crop
+# Periodic full-frame look: every L0_EVERY frames (0 = never) spend one frame at L0 so
+# large classes (hangar, towers, launchers) anywhere in the 4K frame get seen and tracked.
+L0_EVERY = int(os.environ.get("DRONE_L0_EVERY", "0"))
 
 
 def choose_next_view(request: DroneFlybyPredictRequestDto, plan: CameraPlan,
@@ -585,6 +589,13 @@ def _choose_next_view(request: DroneFlybyPredictRequestDto, plan: CameraPlan,
             x, y = step_towards(tx, ty, limit * 0.98)
             p = clamp_to(1, x, y)
             return RequestedViewDto(resolution_level=1, center_x=p[0], center_y=p[1])
+
+    # Periodic L0 look (only when the fixed L0 centre is reachable in one legal step).
+    if L0_EVERY and 0 in allowed and request.frame - plan.last_l0_frame >= L0_EVERY \
+            and math.hypot(IMAGE_WIDTH / 2 - cx, IMAGE_HEIGHT / 2 - cy) <= limit * 0.98:
+        plan.last_l0_frame = request.frame
+        p = clamp_to(0, IMAGE_WIDTH / 2, IMAGE_HEIGHT / 2)
+        return RequestedViewDto(resolution_level=0, center_x=p[0], center_y=p[1])
 
     # Dive: one frame at L2 on a track that deserves a closer look.
     if DIVE_ENABLED and tracker is not None and 2 in allowed and request.frame - plan.last_dive_frame >= DIVE_EVERY:
